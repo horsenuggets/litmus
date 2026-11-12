@@ -1,0 +1,9 @@
+# Roblox Studio lock files
+*.rbxlx.lock
+*.rbxl.lock
+
+# Rojo files
+sourcemap.json
+
+# Luau-lsp
+luau-cache
