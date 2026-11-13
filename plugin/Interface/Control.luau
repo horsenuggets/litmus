@@ -19,7 +19,7 @@ export type Props = {
     cliResultsActivated: () -> (),
 }
 
-local SIDE_PADDING: number = 20
+local PADDING: number = 20
 local GAP: number = 10
 
 local CONNECT_ROW_HEIGHT: number = 36
@@ -41,49 +41,62 @@ local function control(scope: flux.Scope, props: Props): Frame
         BackgroundTransparency = 0,
 
         scope:element "UIPadding" {
-            PaddingLeft = UDim.new(0, SIDE_PADDING),
-            PaddingRight = UDim.new(0, SIDE_PADDING),
+            PaddingTop = UDim.new(0, PADDING),
+            PaddingBottom = UDim.new(0, PADDING),
+            PaddingLeft = UDim.new(0, PADDING),
+            PaddingRight = UDim.new(0, PADDING),
         },
-
-        scope:element "UIListLayout" {
-            VerticalAlignment = Enum.VerticalAlignment.Center,
-            Padding = UDim.new(0, GAP),
-        },
-
-        header(scope, { layoutOrder = 1 }),
 
         scope:element "Frame" {
-            Name = "Connect",
-            LayoutOrder = 2,
+            Name = "Top",
 
-            Size = UDim2.new(1, 0, 0, CONNECT_ROW_HEIGHT),
+            AnchorPoint = Vector2.new(0.5, 0),
+            Position = UDim2.fromScale(0.5, 0),
+
+            AutomaticSize = Enum.AutomaticSize.Y,
+            Size = UDim2.fromScale(1, 0),
 
             scope:element "UIListLayout" {
-                FillDirection = Enum.FillDirection.Horizontal,
-                VerticalAlignment = Enum.VerticalAlignment.Center,
-                HorizontalFlex = Enum.UIFlexAlignment.SpaceBetween,
+                Padding = UDim.new(0, GAP),
             },
 
-            label(scope, {
-                layoutOrder = 1,
+            header(scope, { layoutOrder = 1 }),
 
-                text = "Connect to CLI",
-                font = theme.mainFont,
-                size = theme.mediumTextSize,
-                color = colors.text,
-            }),
+            scope:element "Frame" {
+                Name = "Connect",
+                LayoutOrder = 2,
 
-            checkbox(scope, {
-                layoutOrder = 2,
+                Size = UDim2.new(1, 0, 0, CONNECT_ROW_HEIGHT),
 
-                checked = props.connected,
-                activated = props.connectActivated,
-            }),
+                scope:element "UIListLayout" {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    VerticalAlignment = Enum.VerticalAlignment.Center,
+                    HorizontalFlex = Enum.UIFlexAlignment.SpaceBetween,
+                },
+
+                label(scope, {
+                    layoutOrder = 1,
+
+                    text = "Connect to CLI",
+                    font = theme.mainFont,
+                    size = theme.mediumTextSize,
+                    color = colors.text,
+                }),
+
+                checkbox(scope, {
+                    layoutOrder = 2,
+
+                    checked = props.connected,
+                    activated = props.connectActivated,
+                }),
+            },
         },
 
         scope:element "Frame" {
             Name = "Buttons",
-            LayoutOrder = 3,
+
+            AnchorPoint = Vector2.new(0.5, 1),
+            Position = UDim2.fromScale(0.5, 1),
 
             Size = UDim2.new(1, 0, 0, BUTTON_ROW_HEIGHT),
 
