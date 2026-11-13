@@ -49,9 +49,17 @@ local LOADER: string = "ReplicatedStorage.Tests.Loader"
 
 local ERRORS: string = `{INTERFACE}.Errors.spec`
 local EXPECT: string = `{INTERFACE}.Expect.spec`
+local FAILURES: string = `{INTERFACE}.Failures.spec`
+local THROWER: string = "ReplicatedStorage.Tests.Utils.Thrower"
+local BAD_PATH: string = `{LOADER}.BadPath.spec`
+local MISSING_MODULE: string = `{LOADER}.MissingModule.spec`
 local TOP_LEVEL_ERROR: string = `{LOADER}.TopLevelError.spec`
 
 local EXPECTED: { ExpectedSpec } = {
+    {
+        path = `{INTERFACE}.Empty.spec`,
+        tests = {},
+    },
     {
         path = ERRORS,
         tests = {
@@ -120,6 +128,49 @@ local EXPECTED: { ExpectedSpec } = {
         },
     },
     {
+        path = FAILURES,
+        tests = {
+            {
+                name = "reports every line of a message",
+                groups = {},
+                failure = { message = "first line\nsecond line\nthird line", source = FAILURES, line = 9 },
+            },
+            {
+                name = "reports a long message",
+                groups = {},
+                failure = {
+                    message = `expected "{string.rep("right ", 30)}", got "{string.rep("left ", 30)}"`,
+                    source = FAILURES,
+                    line = 13,
+                },
+            },
+            {
+                name = "reports a thrown table",
+                groups = {},
+                failure = { source = FAILURES, line = 17 },
+            },
+            {
+                name = "points at the helper that threw",
+                groups = {},
+                failure = { message = `{THROWER}:3: thrown from a helper`, source = THROWER, line = 3 },
+            },
+            {
+                name = "points at a test registered while tests run",
+                groups = {},
+                failure = {
+                    message = `{FAILURES}:25: [Litmus]: test called outside a spec`,
+                    source = FAILURES,
+                    line = 25,
+                },
+            },
+            {
+                name = "names every group it sits in",
+                groups = { "outer", "inner" },
+                failure = { message = 'expected "expected", got "actual"', source = FAILURES, line = 31 },
+            },
+        },
+    },
+    {
         path = `{INTERFACE}.Groups.spec`,
         tests = {
             { name = "sits outside every group", groups = {} },
@@ -130,11 +181,35 @@ local EXPECTED: { ExpectedSpec } = {
         },
     },
     {
+        path = `{INTERFACE}.Single.spec`,
+        tests = {
+            { name = "stands alone", groups = {} },
+        },
+    },
+    {
+        path = BAD_PATH,
+        tests = {},
+        failure = {
+            message = `[Litmus]: can't require "@pkg/Thing": "@pkg" leads nowhere; a path starts with ./, ../, @self or @game`,
+            source = BAD_PATH,
+            line = 1,
+        },
+    },
+    {
         path = `{LOADER}.Cycle.spec`,
         tests = {},
         failure = {
             message = `[Litmus]: modules require each other in a cycle: {LOADER}.CycleA -> {LOADER}.CycleB -> {LOADER}.CycleA`,
             source = `{LOADER}.CycleB`,
+            line = 1,
+        },
+    },
+    {
+        path = MISSING_MODULE,
+        tests = {},
+        failure = {
+            message = `[Litmus]: can't require "./Missing": there is no ModuleScript at that path`,
+            source = MISSING_MODULE,
             line = 1,
         },
     },
