@@ -25,7 +25,6 @@ loader.__index = loader
 type Members = {
     _host: Host,
     _loaded: { [Module]: Loaded },
-    _globals: { [any]: any },
 }
 
 export type Class = setmetatable<Members, typeof(loader)>
@@ -34,7 +33,6 @@ function loader.new(host: Host): Class
     local self: Class = (setmetatable({}, loader) :: any)
     self._host = host
     self._loaded = {}
-    self._globals = {}
     return self
 end
 
@@ -63,7 +61,6 @@ function loader._run(self: Class, module: Module, requirer: Link?): { n: number,
         require = function(target: unknown): any
             return self:_load(self._host.resolve(module, target), link)
         end,
-        _G = self._globals,
     })
 
     return table.pack(chunk())

@@ -146,7 +146,6 @@ local EXPECTED: { ExpectedSpec } = {
             { name = "requires from the DataModel with @game", groups = {} },
             { name = "requires an instance", groups = {} },
             { name = "gives a module its own script", groups = {} },
-            { name = "starts each run with an empty _G that its modules share", groups = {} },
         },
     },
     {

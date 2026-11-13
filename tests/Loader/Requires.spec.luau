@@ -24,7 +24,3 @@ end)
 test("gives a module its own script", function(): ()
     expect.equal(environment.script, script.Parent.Parent.Utils.Environment)
 end)
-
-test("starts each run with an empty _G that its modules share", function(): ()
-    expect.equal(_G.environmentLoads, 1)
-end)
