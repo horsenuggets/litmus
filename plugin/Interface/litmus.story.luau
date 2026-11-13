@@ -2,7 +2,11 @@ local control = require("../Interface/Control")
 local flux = require("../Packages/Flux")
 local place = require("../Place")
 local results = require("../Interface/Results")
+local studioColors = require("../Interface/StudioColors")
+local textButton = require("../Interface/Components/TextButton")
 local theme = require("../Interface/Theme")
+
+local studio: Studio = settings().Studio
 
 -- The sizes the windows open at, so the story shows what each window will
 local CONTROL_SIZE: UDim2 = UDim2.fromOffset(320, 210)
@@ -138,7 +142,12 @@ local SAMPLE_RESULTS: { results.SpecResult } = {
 -- Shows the control window without and with results from the CLI, sharing one checkbox state, beside the results window
 local function story(target: Frame): () -> ()
     local scope: flux.Scope = flux.scope()
-    theme.provide(scope)
+
+    -- Starts on the theme Studio is using, and from then on shows whichever the button below picks
+    local shownTheme: flux.Value<StudioTheme> = scope:value(studio.Theme)
+    theme.provide(scope, studioColors(scope, shownTheme))
+
+    local isDark: flux.Computed<boolean> = theme.colors(scope).isDark
 
     local connected: flux.Value<boolean> = scope:value(false)
     local cliResultsUnseen: flux.Value<boolean> = scope:value(true)
@@ -191,6 +200,28 @@ local function story(target: Frame): () -> ()
             scope:element "UIListLayout" {
                 Padding = UDim.new(0, GAP),
             },
+
+            -- Rebuilt on each switch, since its text says which theme a press leads to
+            scope:computed(function(use: flux.Use, inner: flux.Scope): TextButton
+                local dark: boolean = use(isDark)
+
+                return textButton(inner, {
+                    layoutOrder = 0,
+
+                    text = if dark then "Switch to light" else "Switch to dark",
+                    style = "solid",
+
+                    activated = function(): ()
+                        local wanted: string = if dark then "Light" else "Dark"
+
+                        for _, available: StudioTheme in studio:GetAvailableThemes() do
+                            if available.Name == wanted then
+                                shownTheme:set(available)
+                            end
+                        end
+                    end,
+                })
+            end),
 
             controlWindow(1, false),
             controlWindow(2, true),
