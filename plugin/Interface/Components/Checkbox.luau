@@ -48,13 +48,11 @@ local function checkbox(scope: flux.Scope, props: Props): TextButton
             scope:element "UIStroke" { Color = colors.border, Thickness = STROKE },
         },
 
-        icon(scope, {
-            zIndex = 2,
-
+        scope:hydrate(icon(scope, {
             name = "cross",
             size = ICON_SIZE,
             gradient = colors.mutedGradient,
-        }),
+        })) { ZIndex = 2 },
 
         scope:element "Frame" {
             Name = "Fill",
@@ -66,14 +64,12 @@ local function checkbox(scope: flux.Scope, props: Props): TextButton
             scope:element "UIGradient" { Color = theme.brandGradient },
         },
 
-        icon(scope, {
-            zIndex = 4,
-
+        scope:hydrate(icon(scope, {
             name = "check",
             size = ICON_SIZE,
             gradient = theme.onBrandGradient,
             transparency = transparency,
-        }),
+        })) { ZIndex = 4 },
     }
 end
 

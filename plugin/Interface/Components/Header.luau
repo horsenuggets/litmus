@@ -1,5 +1,6 @@
 local flux = require("../../Packages/Flux")
 local imageIds = require("../../ImageIds")
+local label = require("./Label")
 local theme = require("../Theme")
 
 export type Props = {
@@ -37,19 +38,14 @@ local function header(scope: flux.Scope, props: Props): Frame
             end),
         },
 
-        scope:element "TextLabel" {
-            Name = "Title",
-            LayoutOrder = 2,
+        label(scope, {
+            layoutOrder = 2,
 
-            AutomaticSize = Enum.AutomaticSize.XY,
-            Size = UDim2.new(),
-
-            Text = "Litmus",
-            TextScaled = false,
-            TextSize = theme.titleTextSize,
-            FontFace = theme.boldFont,
-            TextColor3 = colors.brightText,
-        },
+            text = "Litmus",
+            font = theme.boldFont,
+            size = theme.titleTextSize,
+            color = colors.brightText,
+        }),
     }
 end
 

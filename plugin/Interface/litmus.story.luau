@@ -1,10 +1,12 @@
-local control = require("../Interface/Control")
+local control = require("./Control")
 local flux = require("../Packages/Flux")
+local outcome = require("../Outcome")
 local place = require("../Place")
-local results = require("../Interface/Results")
-local studioColors = require("../Interface/StudioColors")
-local textButton = require("../Interface/Components/TextButton")
-local theme = require("../Interface/Theme")
+local results = require("./Results")
+local sources = require("./Sources")
+local studioColors = require("./StudioColors")
+local textButton = require("./Components/TextButton")
+local theme = require("./Theme")
 
 local studio: Studio = settings().Studio
 
@@ -16,7 +18,7 @@ local GAP: number = 20
 local TESTS: string = "ReplicatedStorage.Tests"
 
 -- One of each thing the results window has to show, in the shape the lib returns
-local SAMPLE_RESULTS: { results.SpecResult } = {
+local SAMPLE_RESULTS: { outcome.SpecResult } = {
     {
         path = `{TESTS}.Interface.Empty.spec`,
         tests = {},
@@ -147,10 +149,13 @@ local function story(target: Frame): () -> ()
     local shownTheme: flux.Value<StudioTheme> = scope:value(studio.Theme)
     theme.provide(scope, studioColors(scope, shownTheme))
 
+    -- The sample names scripts this place really has, so their lines of code show
+    sources.provide(scope, place.sourceNamed)
+
     local isDark: flux.Computed<boolean> = theme.colors(scope).isDark
 
     local connected: flux.Value<boolean> = scope:value(false)
-    local cliResultsUnseen: flux.Value<boolean> = scope:value(true)
+    local cliResults: flux.Value<control.CliResults> = scope:value("unseen" :: control.CliResults)
 
     local function controlWindow(layoutOrder: number, hasCliResults: boolean): Frame
         return scope:element "Frame" {
@@ -167,13 +172,12 @@ local function story(target: Frame): () -> ()
 
                 -- Stands in for a new result arriving from the CLI, so the dot can be brought back
                 testActivated = function(): ()
-                    cliResultsUnseen:set(true)
+                    cliResults:set("unseen")
                 end,
 
-                hasCliResults = hasCliResults,
-                cliResultsUnseen = cliResultsUnseen,
+                cliResults = if hasCliResults then cliResults else "none",
                 cliResultsActivated = function(): ()
-                    cliResultsUnseen:set(false)
+                    cliResults:set("seen")
                 end,
             }),
         }
@@ -233,10 +237,8 @@ local function story(target: Frame): () -> ()
 
             Size = RESULTS_SIZE,
 
-            -- The sample names scripts this place really has, so their lines of code show
             results(scope, {
-                results = SAMPLE_RESULTS,
-                readSource = place.sourceNamed,
+                ran = { kind = "results", results = SAMPLE_RESULTS },
             }),
         },
     }

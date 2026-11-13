@@ -1,5 +1,7 @@
 local button = require("../../Packages/Interface/Hooks/Button")
 local flux = require("../../Packages/Flux")
+local highlight = require("./Highlight")
+local ripple = require("./Ripple")
 local theme = require("../Theme")
 
 export type Style = "solid" | "bordered"
@@ -16,11 +18,6 @@ export type Props = {
 }
 
 local HEIGHT: number = 34
-
--- The dot sits just inside the button's top right corner, overlapping its edge
-local NOTICE_SIZE: number = 8
-local NOTICE_INSET: number = 2
-local NOTICE_RING: number = 2
 local SIDE_PADDING: number = 15
 local STROKE: number = 1
 
@@ -30,15 +27,10 @@ local FILL_ALPHA: { [Style]: number } = {
     bordered = theme.hoverAlpha,
 }
 
-local RIPPLE_GROW_SPEED: number = 44
-local RIPPLE_GROW_DAMPING: number = 2
-local RIPPLE_FADE_SPEED: number = 31
-
--- How far the furthest corner of a `size` rectangle is from `point` inside it
-local function reachFrom(point: Vector2, size: Vector2): number
-    local furthest: Vector2 = Vector2.new(math.max(point.X, size.X - point.X), math.max(point.Y, size.Y - point.Y))
-    return furthest.Magnitude
-end
+-- The dot sits just inside the button's top right corner, overlapping its edge
+local NOTICE_SIZE: number = 8
+local NOTICE_INSET: number = 2
+local NOTICE_RING: number = 2
 
 local function textButton(scope: flux.Scope, props: Props): TextButton
     local colors: theme.Colors = theme.colors(scope)
@@ -50,37 +42,11 @@ local function textButton(scope: flux.Scope, props: Props): TextButton
     local hovering: flux.Value<boolean> = scope:value(false)
     local pressing: flux.Value<boolean> = scope:value(false)
 
-    local hover: flux.Spring<number> = scope:spring(scope:computed(function(use: flux.Use): number
-        return if use(hovering) then 1 else 0
-    end), theme.hoverSpeed)
-
-    -- A press starts a circle at the pointer that grows to cover the button, and fades once the press ends
-    local rippleOrigin: flux.Value<Vector2> = scope:value(Vector2.zero)
-    local rippleReach: flux.Value<number> = scope:value(0)
-    local rippleTarget: flux.Value<number> = scope:value(0)
-
-    local rippleGrowth: flux.Spring<number> = scope:spring(rippleTarget, RIPPLE_GROW_SPEED, RIPPLE_GROW_DAMPING)
-    local rippleOpacity: flux.Spring<number> = scope:spring(scope:computed(function(use: flux.Use): number
-        return if use(pressing) then 1 else 0
-    end), RIPPLE_FADE_SPEED)
-
-    local function startRipple(_: flux.Scope, instance: TextButton): ()
-        scope:insert(instance.InputBegan:Connect(function(input: InputObject): ()
-            if input.UserInputType ~= Enum.UserInputType.MouseButton1 then
-                return
-            end
-
-            local origin: Vector2 = Vector2.new(input.Position.X, input.Position.Y) - instance.AbsolutePosition
-
-            rippleOrigin:set(origin)
-            rippleReach:set(reachFrom(origin, instance.AbsoluteSize))
-
-            -- Both jump to where a new ripple starts, since the last one may still be showing
-            rippleGrowth:setPosition(0)
-            rippleOpacity:setPosition(1)
-            rippleTarget:set(1)
-        end))
-    end
+    local rippleLayer: Frame, startRipple: (flux.Scope, GuiButton) -> () = ripple(scope, {
+        color = fillColor,
+        alpha = fillAlpha,
+        pressing = pressing,
+    })
 
     return scope:element "TextButton" {
         Name = props.text,
@@ -121,17 +87,12 @@ local function textButton(scope: flux.Scope, props: Props): TextButton
                 scope:element "UIStroke" { Color = colors.border, Thickness = STROKE },
             },
 
-        scope:element "Frame" {
-            Name = "Hover",
-            ZIndex = 2,
-
-            BackgroundColor3 = fillColor,
-            BackgroundTransparency = scope:computed(function(use: flux.Use): number
-                return 1 - fillAlpha * use(hover)
+        scope:hydrate(highlight(scope, {
+            color = fillColor,
+            opacity = scope:computed(function(use: flux.Use): number
+                return if use(hovering) then fillAlpha else 0
             end),
-
-            scope:element "UICorner" { CornerRadius = theme.cornerRadius },
-        },
+        })) { ZIndex = 2 },
 
         scope:element "TextLabel" {
             Name = "Label",
@@ -156,33 +117,7 @@ local function textButton(scope: flux.Scope, props: Props): TextButton
             },
         },
 
-        scope:element "Frame" {
-            Name = "Ripple",
-            ZIndex = 4,
-
-            ClipsDescendants = true,
-
-            scope:element "Frame" {
-                Name = "Circle",
-
-                Position = scope:computed(function(use: flux.Use): UDim2
-                    local origin: Vector2 = use(rippleOrigin)
-                    return UDim2.fromOffset(origin.X, origin.Y)
-                end),
-
-                Size = scope:computed(function(use: flux.Use): UDim2
-                    local diameter: number = use(rippleReach) * use(rippleGrowth) * 2
-                    return UDim2.fromOffset(diameter, diameter)
-                end),
-
-                BackgroundColor3 = fillColor,
-                BackgroundTransparency = scope:computed(function(use: flux.Use): number
-                    return 1 - fillAlpha * use(rippleOpacity)
-                end),
-
-                scope:element "UICorner" {},
-            },
-        },
+        scope:hydrate(rippleLayer) { ZIndex = 4 },
 
         -- Held in a layer of its own, so the dot is neither clipped with the ripple nor counted in the button's width
         scope:element "Frame" {

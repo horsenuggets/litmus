@@ -1,8 +1,12 @@
 local checkbox = require("./Components/Checkbox")
 local flux = require("../Packages/Flux")
 local header = require("./Components/Header")
+local label = require("./Components/Label")
 local textButton = require("./Components/TextButton")
 local theme = require("./Theme")
+
+-- Whether there are results from a CLI's run to open, and if so whether they have been opened yet
+export type CliResults = "none" | "unseen" | "seen"
 
 export type Props = {
     connected: flux.UsedAs<boolean>,
@@ -10,12 +14,9 @@ export type Props = {
 
     testActivated: () -> (),
 
-    -- The button for the CLI's results exists only while there are some to show
-    hasCliResults: flux.UsedAs<boolean>,
+    -- The button for the CLI's results exists only while there are some, and carries a dot until they are opened
+    cliResults: flux.UsedAs<CliResults>,
     cliResultsActivated: () -> (),
-
-    -- Whether the CLI's results are newer than the last time they were opened, which the button marks with a dot
-    cliResultsUnseen: flux.UsedAs<boolean>,
 }
 
 local SIDE_PADDING: number = 20
@@ -27,6 +28,11 @@ local BUTTON_ROW_HEIGHT: number = 34
 -- What the control window holds, built into whatever it is parented to
 local function control(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
+
+    -- Rebuilt only when results appear or go, and not when they are merely seen
+    local hasCliResults: flux.Computed<boolean> = scope:computed(function(use: flux.Use): boolean
+        return use(props.cliResults) ~= "none"
+    end)
 
     return scope:element "Frame" {
         Name = "Control",
@@ -58,19 +64,14 @@ local function control(scope: flux.Scope, props: Props): Frame
                 HorizontalFlex = Enum.UIFlexAlignment.SpaceBetween,
             },
 
-            scope:element "TextLabel" {
-                Name = "Label",
-                LayoutOrder = 1,
+            label(scope, {
+                layoutOrder = 1,
 
-                AutomaticSize = Enum.AutomaticSize.XY,
-                Size = UDim2.new(),
-
-                Text = "Connect to CLI",
-                TextScaled = false,
-                TextSize = theme.mediumTextSize,
-                FontFace = theme.mainFont,
-                TextColor3 = colors.text,
-            },
+                text = "Connect to CLI",
+                font = theme.mainFont,
+                size = theme.mediumTextSize,
+                color = colors.text,
+            }),
 
             checkbox(scope, {
                 layoutOrder = 2,
@@ -93,7 +94,7 @@ local function control(scope: flux.Scope, props: Props): Frame
             },
 
             scope:computed(function(use: flux.Use, inner: flux.Scope): TextButton?
-                if not use(props.hasCliResults) then
+                if not use(hasCliResults) then
                     return nil
                 end
 
@@ -103,7 +104,10 @@ local function control(scope: flux.Scope, props: Props): Frame
                     text = "CLI",
                     style = "bordered",
                     activated = props.cliResultsActivated,
-                    hasNotice = props.cliResultsUnseen,
+
+                    hasNotice = inner:computed(function(useInner: flux.Use): boolean
+                        return useInner(props.cliResults) == "unseen"
+                    end),
                 })
             end),
 

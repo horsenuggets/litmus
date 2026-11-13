@@ -1,20 +1,18 @@
 local collapsible = require("./Components/Collapsible")
 local flux = require("../Packages/Flux")
-local outcome = require("./Outcome")
+local iconLine = require("./Components/IconLine")
+local label = require("./Components/Label")
+local outcome = require("../Outcome")
+local paths = require("./Paths")
 local specRow = require("./Components/SpecRow")
 local summary = require("./Components/Summary")
 local theme = require("./Theme")
-
-export type SpecResult = outcome.SpecResult
+local words = require("./Words")
 
 export type Props = {
-    results: flux.UsedAs<{ SpecResult }>,
-
-    -- The source of the script with this full name, if it can still be found
-    readSource: (name: string) -> string?,
+    -- The run to show: its results, or why it has none
+    ran: flux.UsedAs<outcome.Run>,
 }
-
-local SUMMARY_HEIGHT: number = 44
 
 local LIST_PADDING: number = 8
 local FOLD_HEIGHT: number = 28
@@ -27,8 +25,8 @@ local SCROLL_BAR_TRANSPARENCY: number = 0.65
 local function results(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
 
-    local tally: flux.Computed<outcome.Tally> = scope:computed(function(use: flux.Use): outcome.Tally
-        return outcome.tally(use(props.results))
+    local specs: flux.Computed<{ outcome.SpecResult }> = scope:computed(function(use: flux.Use): { outcome.SpecResult }
+        return outcome.resultsOf(use(props.ran))
     end)
 
     local picked: flux.Value<outcome.Status?> = scope:value(nil :: outcome.Status?)
@@ -37,7 +35,7 @@ local function results(scope: flux.Scope, props: Props): Frame
     local selected: flux.Computed<outcome.Status?> = scope:computed(function(use: flux.Use): outcome.Status?
         local status: outcome.Status? = use(picked)
 
-        for _, spec in use(props.results) do
+        for _, spec in use(specs) do
             if outcome.statusOf(spec) == status then
                 return status
             end
@@ -46,24 +44,18 @@ local function results(scope: flux.Scope, props: Props): Frame
         return nil
     end)
 
-    local function rowsOf(building: flux.Scope, specs: { SpecResult }, root: string): { Instance }
+    local function rowsOf(building: flux.Scope, shown: { outcome.SpecResult }, root: string): { Instance }
         local rows: { Instance } = {}
 
-        for index, spec in specs do
-            rows[index] = specRow(building, {
-                layoutOrder = index,
-
-                spec = spec,
-                root = root,
-                readSource = props.readSource,
-            })
+        for index, spec in shown do
+            rows[index] = specRow(building, { layoutOrder = index, spec = spec, root = root })
         end
 
         return rows
     end
 
     -- Passing specs fold behind a labelled line while anything is wrong, so what needs attention is all that shows
-    local function foldOf(building: flux.Scope, passed: { SpecResult }, root: string, layoutOrder: number): Frame
+    local function foldOf(building: flux.Scope, passed: { outcome.SpecResult }, root: string, layoutOrder: number): Frame
         local tests: number = 0
         for _, spec in passed do
             tests += #spec.tests
@@ -79,19 +71,14 @@ local function results(scope: flux.Scope, props: Props): Frame
             flush = true,
 
             head = {
-                building:element "TextLabel" {
-                    Name = "Label",
-                    LayoutOrder = 1,
+                label(building, {
+                    layoutOrder = 1,
 
-                    AutomaticSize = Enum.AutomaticSize.X,
-                    Size = UDim2.fromScale(0, 1),
-
-                    Text = `{outcome.plural(#passed, "spec")} passed  ·  {outcome.plural(tests, "test")}`,
-                    TextScaled = false,
-                    TextSize = theme.smallTextSize,
-                    FontFace = theme.mainFont,
-                    TextColor3 = colors.subText,
-                },
+                    text = `{words.plural(#passed, "spec")} passed  ·  {words.plural(tests, "test")}`,
+                    font = theme.mainFont,
+                    size = theme.smallTextSize,
+                    color = colors.subText,
+                }),
 
                 building:element "Frame" {
                     Name = "Line",
@@ -112,28 +99,69 @@ local function results(scope: flux.Scope, props: Props): Frame
         })
     end
 
+    local function listOf(building: flux.Scope, ran: outcome.Run, only: outcome.Status?): { Instance }
+        if ran.kind == "problem" then
+            return {
+                iconLine(building, {
+                    icon = "warn",
+                    gradient = colors.errorGradient,
+
+                    text = words.untagged(ran.message),
+                    color = colors.brightText,
+                }),
+            }
+        end
+
+        -- Worked out over every spec, so narrowing the list doesn't change how a row's path reads
+        local specPaths: { string } = {}
+        for index, spec in ran.results do
+            specPaths[index] = spec.path
+        end
+
+        local root: string = paths.sharedParent(specPaths)
+        local wrong: { outcome.SpecResult }, passed: { outcome.SpecResult } = outcome.arranged(ran.results, only)
+
+        if #wrong == 0 then
+            return rowsOf(building, passed, root)
+        end
+
+        local rows: { Instance } = rowsOf(building, wrong, root)
+
+        if #passed > 0 then
+            table.insert(rows, foldOf(building, passed, root, #wrong + 1))
+        end
+
+        return rows
+    end
+
+    local top: Frame = summary(scope, {
+        tally = scope:computed(function(use: flux.Use): outcome.Tally
+            return outcome.tally(use(specs))
+        end),
+
+        selected = selected,
+        statusActivated = function(status: outcome.Status): ()
+            picked:set(if flux.peek(selected) == status then nil else status)
+        end,
+    })
+
+    -- The list starts where the summary ends, whatever height the summary gives itself
+    local listTop: number = top.Size.Y.Offset
+
     return scope:element "Frame" {
         Name = "Results",
 
         BackgroundColor3 = colors.background,
         BackgroundTransparency = 0,
 
-        summary(scope, {
-            height = SUMMARY_HEIGHT,
-            tally = tally,
-            selected = selected,
-
-            statusActivated = function(status: outcome.Status): ()
-                picked:set(if flux.peek(selected) == status then nil else status)
-            end,
-        }),
+        top,
 
         scope:element "ScrollingFrame" {
             Name = "Specs",
 
             AnchorPoint = Vector2.zero,
-            Position = UDim2.fromOffset(0, SUMMARY_HEIGHT),
-            Size = UDim2.new(1, 0, 1, -SUMMARY_HEIGHT),
+            Position = UDim2.fromOffset(0, listTop),
+            Size = UDim2.new(1, 0, 1, -listTop),
 
             AutomaticCanvasSize = Enum.AutomaticSize.Y,
             CanvasSize = UDim2.new(),
@@ -156,39 +184,9 @@ local function results(scope: flux.Scope, props: Props): Frame
                 Padding = UDim.new(0, theme.listGap),
             },
 
-            -- New results or a new pick replace every row, since nothing ties one list's rows to the next's
+            -- A new run or a new pick replaces every row, since nothing ties one list's rows to the next's
             scope:computed(function(use: flux.Use, inner: flux.Scope): { Instance }
-                local all: { SpecResult } = use(props.results)
-                local status: outcome.Status? = use(selected)
-
-                -- Worked out over every spec, so narrowing the list doesn't change how a row's path reads
-                local root: string = outcome.sharedParent(all)
-
-                local wrong: { SpecResult } = {}
-                local passed: { SpecResult } = {}
-
-                for _, spec in all do
-                    local specStatus: outcome.Status = outcome.statusOf(spec)
-
-                    if status and specStatus ~= status then
-                        continue
-                    end
-
-                    table.insert(if specStatus == "PASS" then passed else wrong, spec)
-                end
-
-                if #wrong == 0 then
-                    return rowsOf(inner, passed, root)
-                end
-
-                -- What went wrong comes first, in the order it ran
-                local rows: { Instance } = rowsOf(inner, wrong, root)
-
-                if #passed > 0 then
-                    table.insert(rows, foldOf(inner, passed, root, #wrong + 1))
-                end
-
-                return rows
+                return listOf(inner, use(props.ran), use(selected))
             end),
         },
     }

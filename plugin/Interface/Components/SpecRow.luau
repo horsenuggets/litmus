@@ -2,47 +2,35 @@ local collapsible = require("./Collapsible")
 local failureBox = require("./FailureBox")
 local flux = require("../../Packages/Flux")
 local icon = require("./Icon")
-local outcome = require("../Outcome")
+local label = require("./Label")
+local outcome = require("../../Outcome")
+local paths = require("../Paths")
+local statusStyle = require("../Status")
 local testList = require("./TestList")
 local theme = require("../Theme")
+local words = require("../Words")
 
 export type Props = {
     spec: outcome.SpecResult,
 
     -- The start of the spec's path that every spec shares, which the row leaves out
     root: string,
-    readSource: (name: string) -> string?,
 
     layoutOrder: number?,
 }
 
 local HEIGHT: number = 30
 
-local STATUS_ICONS: { [outcome.Status]: icon.Name } = {
-    PASS = "check",
-    FAIL = "cross",
-    ERROR = "warn",
-}
+-- Room under a spec's own failure, before its tests or the next row
+local FAILURE_BOTTOM: number = 4
 
 local function specRow(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
     local spec: outcome.SpecResult = props.spec
 
     local status: outcome.Status = outcome.statusOf(spec)
-    local name: string, parent: string = outcome.splitPath(spec.path)
-
-    local statusColors: { [outcome.Status]: flux.Computed<Color3> } = {
-        PASS = colors.pass,
-        FAIL = colors.fail,
-        ERROR = colors.error,
-    }
-    local statusColor: flux.Computed<Color3> = statusColors[status]
-
-    local statusGradients: { [outcome.Status]: flux.Computed<ColorSequence> } = {
-        PASS = colors.passGradient,
-        FAIL = colors.failGradient,
-        ERROR = colors.errorGradient,
-    }
+    local style: statusStyle.Style = statusStyle(scope, status)
+    local name: string, parent: string = paths.split(spec.path)
 
     local specFailure: outcome.Failure? = spec.failure
     local hasDetails: boolean = specFailure ~= nil or #spec.tests > 0
@@ -59,55 +47,38 @@ local function specRow(scope: flux.Scope, props: Props): Frame
             icon(scope, {
                 layoutOrder = 1,
 
-                name = STATUS_ICONS[status],
-                gradient = statusGradients[status],
+                name = style.icon,
+                gradient = style.gradient,
             }),
 
-            scope:element "TextLabel" {
-                Name = "Name",
-                LayoutOrder = 2,
+            label(scope, {
+                layoutOrder = 2,
 
-                AutomaticSize = Enum.AutomaticSize.X,
-                Size = UDim2.fromScale(0, 1),
+                text = name,
+                font = theme.boldFont,
+                size = theme.bodyTextSize,
+                color = colors.brightText,
+            }),
 
-                Text = name,
-                TextScaled = false,
-                TextSize = theme.bodyTextSize,
-                FontFace = theme.boldFont,
-                TextColor3 = colors.brightText,
-            },
+            -- Takes whatever width the rest leave, which pushes the note to the right edge
+            label(scope, {
+                layoutOrder = 3,
+                truncated = true,
 
-            scope:element "TextLabel" {
-                Name = "Parent",
-                LayoutOrder = 3,
+                text = paths.relativeTo(parent, props.root),
+                font = theme.mainFont,
+                size = theme.smallTextSize,
+                color = colors.subText,
+            }),
 
-                Size = UDim2.fromScale(0, 1),
+            label(scope, {
+                layoutOrder = 4,
 
-                Text = outcome.relativeTo(parent, props.root),
-                TextScaled = false,
-                TextSize = theme.smallTextSize,
-                FontFace = theme.mainFont,
-                TextColor3 = colors.subText,
-                TextXAlignment = Enum.TextXAlignment.Left,
-                TextTruncate = Enum.TextTruncate.AtEnd,
-
-                -- Takes whatever width the rest leave, which pushes the note to the right edge
-                scope:element "UIFlexItem" { FlexMode = Enum.UIFlexMode.Fill },
-            },
-
-            scope:element "TextLabel" {
-                Name = "Note",
-                LayoutOrder = 4,
-
-                AutomaticSize = Enum.AutomaticSize.X,
-                Size = UDim2.fromScale(0, 1),
-
-                Text = if status == "ERROR" then "didn't load" else outcome.note(#spec.tests, outcome.failedCount(spec.tests)),
-                TextScaled = false,
-                TextSize = theme.smallTextSize,
-                FontFace = theme.mainFont,
-                TextColor3 = if status == "PASS" then colors.subText else statusColor,
-            },
+                text = if status == "ERROR" then "didn't load" else words.testNote(#spec.tests, outcome.failedCount(spec.tests)),
+                font = theme.mainFont,
+                size = theme.smallTextSize,
+                color = if status == "PASS" then colors.subText else style.color,
+            }),
         },
 
         content = if hasDetails
@@ -115,22 +86,28 @@ local function specRow(scope: flux.Scope, props: Props): Frame
                 local built: { Instance } = {}
 
                 if specFailure then
-                    table.insert(built, failureBox(opened, {
-                        layoutOrder = 1,
-                        indent = theme.rowPadding,
+                    -- Padded as the rows around it are, so the box starts under the spec's icon
+                    table.insert(built, opened:element "Frame" {
+                        Name = "Failure",
+                        LayoutOrder = 1,
 
-                        failure = specFailure,
-                        color = statusColor,
-                        readSource = props.readSource,
-                    }))
+                        AutomaticSize = Enum.AutomaticSize.Y,
+                        Size = UDim2.fromScale(1, 0),
+
+                        opened:element "UIPadding" {
+                            PaddingLeft = UDim.new(0, theme.rowPadding),
+                            PaddingRight = UDim.new(0, theme.rowPadding),
+                            PaddingBottom = UDim.new(0, FAILURE_BOTTOM),
+                        },
+
+                        failureBox(opened, { failure = specFailure, color = style.color }),
+                    })
                 end
 
                 if #spec.tests > 0 then
                     table.insert(built, testList(opened, {
                         layoutOrder = 2,
-
                         tests = spec.tests,
-                        readSource = props.readSource,
                     }))
                 end
 

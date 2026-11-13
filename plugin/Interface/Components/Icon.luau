@@ -18,7 +18,6 @@ export type Props = {
     rotation: flux.UsedAs<number>?,
 
     layoutOrder: number?,
-    zIndex: number?,
 }
 
 type Drawing = {
@@ -42,7 +41,6 @@ local function icon(scope: flux.Scope, props: Props): Frame
     return scope:element "Frame" {
         Name = props.name,
         LayoutOrder = props.layoutOrder,
-        ZIndex = props.zIndex,
 
         Size = UDim2.fromOffset(size, size),
 

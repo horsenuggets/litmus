@@ -1,6 +1,8 @@
 local flux = require("../../Packages/Flux")
-local outcome = require("../Outcome")
+local outcome = require("../../Outcome")
+local sources = require("../Sources")
 local theme = require("../Theme")
+local words = require("../Words")
 local wrappedText = require("./WrappedText")
 
 export type Props = {
@@ -9,20 +11,13 @@ export type Props = {
     -- The outcome's colour, which marks the line the failure points at
     color: flux.UsedAs<Color3>,
 
-    -- The source of the script with this full name, if it can still be found
-    readSource: (name: string) -> string?,
-
     layoutOrder: number?,
-    indent: number,
 }
 
 type CodeLine = {
     number: number,
     text: string,
 }
-
--- The lib tags its own errors with this, which says nothing beside a failure in this window
-local LIB_TAG: string = "[Litmus]: "
 
 -- How many lines are shown on each side of the one a failure points at
 local CONTEXT_LINES: number = 1
@@ -31,7 +26,6 @@ local TAB: string = "    "
 local STROKE: number = 1
 local PADDING: Vector2 = Vector2.new(12, 10)
 local SECTION_GAP: number = 10
-local BOTTOM_MARGIN: number = 6
 
 local CODE_LINE_HEIGHT: number = 20
 local CODE_NUMBER_WIDTH: number = 32
@@ -47,11 +41,7 @@ local function tidy(failure: outcome.Failure): string
         message = string.sub(message, #position + 1)
     end
 
-    if string.sub(message, 1, #LIB_TAG) == LIB_TAG then
-        message = string.sub(message, #LIB_TAG + 1)
-    end
-
-    return message
+    return words.untagged(message)
 end
 
 -- The line a failure points at with the lines around it, shifted left by the indentation they share
@@ -84,20 +74,17 @@ local function codeAround(source: string, line: number): { CodeLine }
     return lines
 end
 
+-- What went wrong, the code it points at, and where that is; as wide as whatever holds it
 local function failureBox(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
     local failure: outcome.Failure = props.failure
 
-    local source: string? = props.readSource(failure.source)
-    local code: { CodeLine } = if source then codeAround(source, failure.line) else {}
-
-    local codeLines: { Frame } = {}
-    for index, entry in code do
+    local function codeLine(layoutOrder: number, entry: CodeLine): Frame
         local pointedAt: boolean = entry.number == failure.line
 
-        codeLines[index] = scope:element "Frame" {
+        return scope:element "Frame" {
             Name = `Line{entry.number}`,
-            LayoutOrder = index,
+            LayoutOrder = layoutOrder,
 
             Size = UDim2.new(1, 0, 0, CODE_LINE_HEIGHT),
 
@@ -139,19 +126,30 @@ local function failureBox(scope: flux.Scope, props: Props): Frame
         }
     end
 
+    -- Read as the box is built, so a script edited since the run shows as it is now
+    local source: string? = sources.read(scope, failure.source)
+
+    local codeLines: { Frame } = {}
+    for index, entry in if source then codeAround(source, failure.line) else {} do
+        codeLines[index] = codeLine(index, entry)
+    end
+
     return scope:element "Frame" {
         Name = "Failure",
         LayoutOrder = props.layoutOrder,
 
+        AnchorPoint = Vector2.zero,
+        Position = UDim2.new(),
+
         AutomaticSize = Enum.AutomaticSize.Y,
         Size = UDim2.fromScale(1, 0),
 
-        -- The box sits in from the edges, so its stroke stays inside whatever clips this
+        -- The box sits in by its stroke, which is drawn outside it and would be cut off by whatever clips this
         scope:element "UIPadding" {
-            PaddingLeft = UDim.new(0, props.indent),
-            PaddingRight = UDim.new(0, theme.rowPadding),
+            PaddingLeft = UDim.new(0, STROKE),
+            PaddingRight = UDim.new(0, STROKE),
             PaddingTop = UDim.new(0, STROKE),
-            PaddingBottom = UDim.new(0, BOTTOM_MARGIN),
+            PaddingBottom = UDim.new(0, STROKE),
         },
 
         scope:element "Frame" {

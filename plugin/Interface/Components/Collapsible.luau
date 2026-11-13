@@ -1,5 +1,6 @@
 local button = require("../../Packages/Interface/Hooks/Button")
 local flux = require("../../Packages/Flux")
+local highlight = require("./Highlight")
 local icon = require("./Icon")
 local theme = require("../Theme")
 
@@ -12,7 +13,7 @@ export type Props = {
     -- Set for content that starts at the row's own left edge, and not under whatever follows the arrow
     flush: boolean?,
 
-    -- Laid out in a row after the arrow, by their layout order
+    -- Laid out in a row after the arrow
     head: any,
 
     -- Builds what the row opens to show, the first time it opens; a row without this can't open
@@ -62,9 +63,6 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
     end
 
     local hovering: flux.Value<boolean> = scope:value(false)
-    local hover: flux.Spring<number> = scope:spring(scope:computed(function(use: flux.Use): number
-        return if canOpen and use(hovering) then 1 else 0
-    end), theme.hoverSpeed)
 
     return scope:element "Frame" {
         Name = "Collapsible",
@@ -94,17 +92,12 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
                 end,
             }),
 
-            scope:element "Frame" {
-                Name = "Hover",
-                ZIndex = 1,
-
-                BackgroundColor3 = colors.buttonHover,
-                BackgroundTransparency = scope:computed(function(use: flux.Use): number
-                    return 1 - HOVER_ALPHA * use(hover)
+            highlight(scope, {
+                color = colors.buttonHover,
+                opacity = scope:computed(function(use: flux.Use): number
+                    return if canOpen and use(hovering) then HOVER_ALPHA else 0
                 end),
-
-                scope:element "UICorner" { CornerRadius = theme.cornerRadius },
-            },
+            }),
 
             scope:element "Frame" {
                 Name = "Line",
@@ -122,7 +115,7 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
                 },
 
                 icon(scope, {
-                    layoutOrder = 0,
+                    layoutOrder = 1,
 
                     name = "chevron",
                     gradient = colors.mutedGradient,
@@ -135,7 +128,23 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
                     end),
                 }),
 
-                props.head,
+                -- The head's items get a row of their own, so their layout orders never have to know about the arrow
+                scope:element "Frame" {
+                    Name = "Items",
+                    LayoutOrder = 2,
+
+                    Size = UDim2.fromScale(0, 1),
+
+                    scope:element "UIFlexItem" { FlexMode = Enum.UIFlexMode.Fill },
+
+                    scope:element "UIListLayout" {
+                        FillDirection = Enum.FillDirection.Horizontal,
+                        VerticalAlignment = Enum.VerticalAlignment.Center,
+                        Padding = UDim.new(0, theme.rowGap),
+                    },
+
+                    props.head,
+                },
             },
         },
 
