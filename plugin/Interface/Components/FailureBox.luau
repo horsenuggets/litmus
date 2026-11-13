@@ -1,3 +1,4 @@
+local codeAround = require("../CodeAround")
 local flux = require("../../Packages/Flux")
 local outcome = require("../../Outcome")
 local sources = require("../Sources")
@@ -13,15 +14,6 @@ export type Props = {
 
     layoutOrder: number?,
 }
-
-type CodeLine = {
-    number: number,
-    text: string,
-}
-
--- How many lines are shown on each side of the one a failure points at
-local CONTEXT_LINES: number = 1
-local TAB: string = "    "
 
 local STROKE: number = 1
 local PADDING: Vector2 = Vector2.new(12, 10)
@@ -44,42 +36,12 @@ local function tidy(failure: outcome.Failure): string
     return words.untagged(message)
 end
 
--- The line a failure points at with the lines around it, shifted left by the indentation they share
-local function codeAround(source: string, line: number): { CodeLine }
-    local all: { string } = string.split(source, "\n")
-    if line < 1 or line > #all then
-        return {}
-    end
-
-    local lines: { CodeLine } = {}
-    local shared: number = math.huge
-
-    for number = math.max(1, line - CONTEXT_LINES), math.min(#all, line + CONTEXT_LINES) do
-        local text: string = string.gsub(string.gsub(all[number], "\r", ""), "\t", TAB)
-
-        local indentation: string? = string.match(text, "^( *)%S")
-        if indentation then
-            shared = math.min(shared, #indentation)
-        end
-
-        table.insert(lines, { number = number, text = text })
-    end
-
-    if shared ~= math.huge then
-        for _, entry in lines do
-            entry.text = string.sub(entry.text, shared + 1)
-        end
-    end
-
-    return lines
-end
-
 -- What went wrong, the code it points at, and where that is; as wide as whatever holds it
 local function failureBox(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
     local failure: outcome.Failure = props.failure
 
-    local function codeLine(layoutOrder: number, entry: CodeLine): Frame
+    local function codeLine(layoutOrder: number, entry: codeAround.Line): Frame
         local pointedAt: boolean = entry.number == failure.line
 
         return scope:element "Frame" {

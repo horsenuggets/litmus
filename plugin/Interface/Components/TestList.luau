@@ -5,6 +5,7 @@ local iconLine = require("./IconLine")
 local label = require("./Label")
 local outcome = require("../../Outcome")
 local statusStyle = require("../Status")
+local testTree = require("../TestTree")
 local theme = require("../Theme")
 local words = require("../Words")
 
@@ -14,61 +15,12 @@ export type Props = {
     layoutOrder: number?,
 }
 
--- A test or a group among the tests, in the order the spec registered them; one holds exactly one of the two
-type Entry = {
-    test: outcome.TestResult?,
-    group: Group?,
-}
-
-type Group = {
-    name: string,
-    entries: { Entry },
-    byName: { [string]: Group },
-
-    total: number,
-    failed: number,
-}
-
 local GROUP_HEIGHT: number = 26
-
-local function newGroup(name: string): Group
-    return { name = name, entries = {}, byName = {}, total = 0, failed = 0 }
-end
-
--- Each test names the groups it sits in from the outside in, which is enough to rebuild their nesting
-local function treeOf(tests: { outcome.TestResult }): Group
-    local root: Group = newGroup("")
-
-    for _, test in tests do
-        local current: Group = root
-
-        for _, name in test.groups do
-            local existing: Group? = current.byName[name]
-            local group: Group = existing or newGroup(name)
-
-            if not existing then
-                current.byName[name] = group
-                table.insert(current.entries, { group = group })
-            end
-
-            group.total += 1
-            if test.failure then
-                group.failed += 1
-            end
-
-            current = group
-        end
-
-        table.insert(current.entries, { test = test })
-    end
-
-    return root
-end
 
 -- A spec's tests under the groups they sit in, each failed test with what went wrong beneath it
 local function testList(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
-    local root: Group = treeOf(props.tests)
+    local root: testTree.Group = testTree(props.tests)
 
     -- With nothing wrong there is nothing to draw the eye, so every group shows; otherwise only the ones with a failure do
     local allPassed: boolean = outcome.failedCount(props.tests) == 0
@@ -90,11 +42,11 @@ local function testList(scope: flux.Scope, props: Props): Frame
         })
     end
 
-    local function entriesOf(building: flux.Scope, group: Group): { Instance }
+    local function entriesOf(building: flux.Scope, group: testTree.Group): { Instance }
         local built: { Instance } = {}
 
         for index, entry in group.entries do
-            local inner: Group? = entry.group
+            local inner: testTree.Group? = entry.group
 
             if entry.test then
                 built[index] = testLine(building, entry.test, index)
