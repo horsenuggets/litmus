@@ -1,7 +1,9 @@
 mod manifest;
+mod report;
 mod server;
 
 use manifest::Manifest;
+use report::SpecResult;
 use server::{Mismatch, Outcome, Server, Timeouts};
 use std::env;
 use std::path::Path;
@@ -20,7 +22,8 @@ fn main() -> ExitCode {
     }
 
     match run() {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::from(1),
         Err(message) => {
             eprintln!("litmus: {message}");
             ExitCode::from(2)
@@ -28,7 +31,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<(), String> {
+/// Whether every spec loaded and every test passed
+fn run() -> Result<bool, String> {
     let manifest = Manifest::read(Path::new("."))?;
     if manifest.specs().is_empty() {
         return Err("the project has no .spec files".to_owned());
@@ -39,10 +43,14 @@ fn run() -> Result<(), String> {
 
     match server.serve(&manifest, Timeouts::default())? {
         Outcome::Results(results) => {
-            let text = serde_json::to_string_pretty(&results)
-                .map_err(|error| format!("couldn't print the results: {error}"))?;
-            println!("{text}");
-            Ok(())
+            let results: Vec<SpecResult> = serde_json::from_value(results).map_err(|error| {
+                format!("couldn't read the results, so the place's lib may not match this CLI: {error}")
+            })?;
+
+            let report = report::render(&results, &manifest);
+            anstream::print!("{}", report.text);
+
+            Ok(report.passed)
         }
         Outcome::Failed { place, message } => {
             Err(format!("{place} couldn't run the tests: {message}"))

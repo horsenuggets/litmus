@@ -24,6 +24,10 @@ struct Node {
 pub struct File {
     pub path: InstancePath,
     pub hash: String,
+
+    /// Where the script is on disk, relative to the project; kept here and not sent to the plugin
+    #[serde(skip)]
+    pub file: PathBuf,
 }
 
 /// Every script the project puts in the place, with what its source must hash to
@@ -94,6 +98,7 @@ fn collect(
             files.push(File {
                 path: path.clone(),
                 hash: hash(&source),
+                file: file.clone(),
             });
         }
 

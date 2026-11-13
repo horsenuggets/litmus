@@ -229,6 +229,7 @@ mod tests {
             files: vec![File {
                 path: vec!["ReplicatedStorage".to_owned(), "Thing.spec".to_owned()],
                 hash: "00".to_owned(),
+                file: "Thing.spec.luau".into(),
             }],
         }
     }
