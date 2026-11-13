@@ -14,6 +14,9 @@ export type Offer = {
     runId: string,
     files: { File },
     specs: { Path },
+
+    -- Not sent by the CLI: the port the offer was read from, which is where its answers go
+    port: number,
 }
 
 -- The CLI takes the first of these that is free, so the two lists have to stay the same
@@ -48,6 +51,12 @@ local function send(port: number, method: Method, route: string, body: { [string
     return response.Success, response.Body
 end
 
+-- Answers an offer, naming its run so the CLI can tell the message isn't for an earlier one
+local function post(offer: Offer, route: string, message: { [string]: any }): boolean
+    message.runId = offer.runId
+    return (send(offer.port, "POST", route, message))
+end
+
 local bridge = {}
 
 bridge.PORTS = PORTS
@@ -65,27 +74,25 @@ function bridge.offer(port: number): Offer?
         return nil
     end
 
+    offer.port = port
     return offer
 end
 
 -- False when another place took the run first
-function bridge.claim(port: number, run: string, placeName: string): boolean
-    local ok: boolean = send(port, "POST", "/claim", { runId = run,place = placeName })
-    return ok
+function bridge.claim(offer: Offer): boolean
+    return post(offer, "/claim", { place = game.Name })
 end
 
-function bridge.reportMismatch(port: number, run: string, placeName: string, missing: { Path }, differing: { Path }): ()
-    send(port, "POST", "/mismatch", { runId = run,place = placeName, missing = missing, differing = differing })
+function bridge.reportMismatch(offer: Offer, missing: { Path }, differing: { Path }): ()
+    post(offer, "/mismatch", { place = game.Name, missing = missing, differing = differing })
 end
 
-function bridge.reportResults(port: number, run: string, results: any): boolean
-    local ok: boolean = send(port, "POST", "/result", { runId = run,results = results })
-    return ok
+function bridge.reportResults(offer: Offer, results: any): boolean
+    return post(offer, "/result", { results = results })
 end
 
-function bridge.reportError(port: number, run: string, message: string): boolean
-    local ok: boolean = send(port, "POST", "/result", { runId = run,error = message })
-    return ok
+function bridge.reportError(offer: Offer, message: string): boolean
+    return post(offer, "/result", { error = message })
 end
 
 return bridge
