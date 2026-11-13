@@ -22,6 +22,9 @@ const LABEL_WIDTH: usize = "ERROR".len();
 
 const DETAIL_INDENT: &str = "     ";
 
+/// The narrowest column worth wrapping a message into; with less room, the terminal is left to wrap it
+const MIN_MESSAGE_WIDTH: usize = 30;
+
 /// The lib tags its own errors with this, which says nothing once the CLI is the one printing them
 const LIB_TAG: &str = "[Litmus]: ";
 
@@ -31,25 +34,37 @@ const MAX_LISTED: usize = 10;
 /// Files by the dotted name the lib reports them under
 type Files<'a> = HashMap<String, &'a Path>;
 
-pub fn render(results: &[SpecResult], manifest: &Manifest) -> String {
+/// `columns` is how wide the terminal is, or nothing when the text isn't going to one
+pub fn render(results: &[SpecResult], manifest: &Manifest, columns: Option<usize>) -> String {
     let files: Files = manifest
         .scripts
         .iter()
         .map(|script| (script.path.join("."), script.file.as_path()))
         .collect();
 
-    let width = results
+    let name_width = results
         .iter()
         .map(|spec| name_of(&spec.path, &files).chars().count())
         .max()
         .unwrap_or(0);
 
     let mut lines: Vec<String> = vec![String::new()];
-    for spec in results {
-        lines.extend(spec_lines(spec, &files, width));
+    let mut after_details = false;
+
+    for (index, spec) in results.iter().enumerate() {
+        let block = spec_lines(spec, &files, name_width, columns);
+        let has_details = block.len() > 1;
+
+        // Passing specs sit together as a list, while a spec with details stands apart on both sides
+        if index > 0 && (has_details || after_details) {
+            lines.push(String::new());
+        }
+
+        lines.extend(block);
+        after_details = has_details;
     }
 
-    if lines.last().is_some_and(|line| !line.is_empty()) {
+    if !results.is_empty() {
         lines.push(String::new());
     }
 
@@ -59,35 +74,33 @@ pub fn render(results: &[SpecResult], manifest: &Manifest) -> String {
     lines.join("\n")
 }
 
-/// A passing spec takes one line; any other is followed by what went wrong and a blank line
-fn spec_lines(spec: &SpecResult, files: &Files, width: usize) -> Vec<String> {
+/// A passing spec takes one line; any other is followed by what went wrong
+fn spec_lines(spec: &SpecResult, files: &Files, name_width: usize, columns: Option<usize>) -> Vec<String> {
     let name = name_of(&spec.path, files);
 
     if let Some(failure) = &spec.failure {
-        return vec![
-            headline(ERROR_BADGE, "ERROR", &name, width, ""),
-            describe(failure, files),
-            String::new(),
-        ];
+        let mut lines = vec![headline(ERROR_BADGE, "ERROR", &name, name_width, "")];
+        lines.extend(describe(failure, files, columns));
+
+        return lines;
     }
 
     let total = spec.tests.len();
     let failed = spec.failed_tests().count();
     if failed == 0 {
-        return vec![headline(PASS_BADGE, "PASS", &name, width, &plural(total, "test"))];
+        return vec![headline(PASS_BADGE, "PASS", &name, name_width, &plural(total, "test"))];
     }
 
     let note = format!("{} of {total} passed", total - failed);
-    let mut lines = vec![headline(FAIL_BADGE, "FAIL", &name, width, &note)];
+    let mut lines = vec![headline(FAIL_BADGE, "FAIL", &name, name_width, &note)];
 
     for (test, failure) in spec.failed_tests() {
         let title: Vec<&str> = test.groups.iter().chain([&test.name]).map(String::as_str).collect();
 
         lines.push(format!("   {} {}", paint(RED, "✗"), title.join(" > ")));
-        lines.push(describe(failure, files));
+        lines.extend(describe(failure, files, columns));
     }
 
-    lines.push(String::new());
     lines
 }
 
@@ -156,19 +169,57 @@ fn name_of(name: &str, files: &Files) -> String {
         .map_or_else(|| name.to_owned(), |file| file.display().to_string())
 }
 
-/// `path:line: message`, the form a terminal turns into a link
-fn describe(failure: &Failure, files: &Files) -> String {
+/// `path:line: message`, the form a terminal turns into a link, with the message's further lines kept under its first
+fn describe(failure: &Failure, files: &Files, columns: Option<usize>) -> Vec<String> {
     let location = format!("{}:{}:", name_of(&failure.source, files), failure.line);
-    let mut message = tidy(failure).lines();
+    let margin = " ".repeat(DETAIL_INDENT.len() + location.chars().count() + 1);
 
-    let mut lines = vec![format!(
-        "{DETAIL_INDENT}{} {}",
-        paint(DIM, &location),
-        message.next().unwrap_or_default()
-    )];
-    lines.extend(message.map(|line| format!("{DETAIL_INDENT}{line}")));
+    let room = columns
+        .map(|columns| columns.saturating_sub(margin.len()))
+        .filter(|room| *room >= MIN_MESSAGE_WIDTH);
 
-    lines.join("\n")
+    let mut message = wrap(tidy(failure), room).into_iter();
+    let first = message.next().unwrap_or_default();
+
+    let mut lines = vec![format!("{DETAIL_INDENT}{} {first}", paint(DIM, &location))];
+    lines.extend(message.map(|line| format!("{margin}{line}")));
+
+    lines
+}
+
+/// Breaks each line longer than `width` between words; a word longer than that is left to overflow
+fn wrap(text: &str, width: Option<usize>) -> Vec<String> {
+    let Some(width) = width else {
+        return text.lines().map(str::to_owned).collect();
+    };
+
+    let mut lines = Vec::new();
+
+    for line in text.lines() {
+        let mut current = String::new();
+        let mut length = 0;
+
+        // Splitting on single spaces keeps runs of them, so indentation inside a message survives
+        for (index, word) in line.split(' ').enumerate() {
+            let word_length = word.chars().count();
+
+            if index == 0 {
+                current.push_str(word);
+                length = word_length;
+            } else if length + 1 + word_length <= width {
+                current.push(' ');
+                current.push_str(word);
+                length += 1 + word_length;
+            } else {
+                lines.push(std::mem::replace(&mut current, word.to_owned()));
+                length = word_length;
+            }
+        }
+
+        lines.push(current);
+    }
+
+    lines
 }
 
 /// Luau starts a thrown message with where it was thrown, which the location beside it already says
@@ -233,8 +284,12 @@ mod tests {
     }
 
     fn plain(results: &str) -> String {
+        plain_at(results, None)
+    }
+
+    fn plain_at(results: &str, columns: Option<usize>) -> String {
         let results: Vec<SpecResult> = serde_json::from_str(results).unwrap();
-        anstream::adapter::strip_str(&render(&results, &manifest())).to_string()
+        anstream::adapter::strip_str(&render(&results, &manifest(), columns)).to_string()
     }
 
     #[test]
@@ -289,7 +344,69 @@ mod tests {
             } }] }]"#,
         );
 
-        assert!(text.contains("     src/Helper.luau:4: boom\n     second line\n"), "{text}");
+        let expected = "
+     src/Helper.luau:4: boom
+                        second line
+";
+
+        assert!(text.contains(expected), "{text}");
+    }
+
+    #[test]
+    fn keeps_passing_specs_together_and_others_apart() {
+        let text = plain(
+            r#"[
+                { "path": "ReplicatedStorage.Good.spec", "tests": [] },
+                { "path": "ReplicatedStorage.Good.spec", "tests": [] },
+                { "path": "ReplicatedStorage.Broken.spec", "tests": [], "failure": {
+                    "message": "boom", "source": "ReplicatedStorage.Broken.spec", "line": 1, "trace": "t"
+                } },
+                { "path": "ReplicatedStorage.Good.spec", "tests": [] }
+            ]"#,
+        );
+
+        let expected = "
+  PASS    tests/Good.spec.luau    0 tests
+  PASS    tests/Good.spec.luau    0 tests
+
+  ERROR   tests/Broken.spec.luau
+     tests/Broken.spec.luau:1: boom
+
+  PASS    tests/Good.spec.luau    0 tests
+
+ Specs  1 errored, 3 passed
+ Tests  none
+";
+
+        assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn wraps_a_long_message_between_words_in_its_own_column() {
+        let results = r#"[{ "path": "ReplicatedStorage.Bad.spec", "tests": [{ "name": "wraps", "groups": [], "failure": {
+            "message": "one two three four five six seven eight nine ten\n  indented stays", "source": "ReplicatedStorage.Helper", "line": 4, "trace": "t"
+        } }] }]"#;
+
+        let expected = "
+     src/Helper.luau:4: one two three four five six
+                        seven eight nine ten
+                          indented stays
+";
+
+        let text = plain_at(results, Some(24 + 30));
+
+        assert!(text.contains(expected), "{text}");
+    }
+
+    #[test]
+    fn leaves_wrapping_to_a_terminal_too_narrow_for_a_column() {
+        let results = r#"[{ "path": "ReplicatedStorage.Bad.spec", "tests": [{ "name": "wraps", "groups": [], "failure": {
+            "message": "one two three four five six seven eight nine ten", "source": "ReplicatedStorage.Helper", "line": 4, "trace": "t"
+        } }] }]"#;
+
+        let text = plain_at(results, Some(24 + 29));
+
+        assert!(text.contains("src/Helper.luau:4: one two three four five six seven eight nine ten\n"), "{text}");
     }
 
     #[test]

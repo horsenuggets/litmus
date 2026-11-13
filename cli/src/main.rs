@@ -7,8 +7,10 @@ use manifest::Manifest;
 use results::{SpecResult, Tally};
 use server::{Outcome, Server, Timeouts};
 use std::env;
+use std::io;
 use std::path::Path;
 use std::process::ExitCode;
+use terminal_size::{Width, terminal_size_of};
 
 const USAGE: &str = "usage: litmus run";
 
@@ -49,7 +51,10 @@ fn run() -> Result<bool, String> {
                 format!("couldn't read the results, so the place's lib may not match this CLI: {error}")
             })?;
 
-            anstream::print!("{}", report::render(&results, &manifest));
+            // Asked of stdout alone, so output sent to a file or another program is never wrapped
+            let columns = terminal_size_of(io::stdout()).map(|(Width(columns), _)| usize::from(columns));
+
+            anstream::print!("{}", report::render(&results, &manifest, columns));
 
             Ok(Tally::of(&results).passed())
         }
