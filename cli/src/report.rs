@@ -1,14 +1,19 @@
 use crate::manifest::Manifest;
 use crate::results::{Failure, SpecResult, Tally};
 use crate::server::Mismatch;
-use anstyle::{AnsiColor, Color, Style};
+use anstyle::{AnsiColor, Color, RgbColor, Style};
 use std::collections::HashMap;
 use std::path::Path;
 
-const PASS_BADGE: Style = badge(AnsiColor::Black, AnsiColor::Green);
-const FAIL_BADGE: Style = badge(AnsiColor::BrightWhite, AnsiColor::Red);
+/// The sixteen named colours have no orange, so this one is given as an exact colour: #FFB042
+const ORANGE_COLOR: Color = Color::Rgb(RgbColor(255, 176, 66));
+
+const PASS_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::Green));
+const FAIL_BADGE: Style = badge(AnsiColor::BrightWhite, Color::Ansi(AnsiColor::Red));
+const ERROR_BADGE: Style = badge(AnsiColor::Black, ORANGE_COLOR);
 const GREEN: Style = AnsiColor::Green.on_default();
 const RED: Style = AnsiColor::Red.on_default();
+const ORANGE: Style = Style::new().fg_color(Some(ORANGE_COLOR));
 const BOLD: Style = Style::new().bold();
 const DIM: Style = Style::new().dimmed();
 
@@ -60,7 +65,7 @@ fn spec_lines(spec: &SpecResult, files: &Files, width: usize) -> Vec<String> {
 
     if let Some(failure) = &spec.failure {
         return vec![
-            headline(FAIL_BADGE, "ERROR", &name, width, ""),
+            headline(ERROR_BADGE, "ERROR", &name, width, ""),
             describe(failure, files),
             String::new(),
         ];
@@ -100,7 +105,7 @@ fn headline(style: Style, label: &str, name: &str, width: usize, note: &str) -> 
 fn summary(tally: &Tally) -> [String; 2] {
     let specs = counts(&[
         (tally.failed_specs, "failed", RED),
-        (tally.errored_specs, "errored", RED),
+        (tally.errored_specs, "errored", ORANGE),
         (tally.passed_specs, "passed", GREEN),
     ]);
     let tests = counts(&[
@@ -193,10 +198,10 @@ fn plural(count: usize, noun: &str) -> String {
     format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 
-const fn badge(text: AnsiColor, background: AnsiColor) -> Style {
+const fn badge(text: AnsiColor, background: Color) -> Style {
     Style::new()
         .fg_color(Some(Color::Ansi(text)))
-        .bg_color(Some(Color::Ansi(background)))
+        .bg_color(Some(background))
         .bold()
 }
 
