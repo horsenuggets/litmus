@@ -1,5 +1,6 @@
 # Build files
 /build.rbxl
+/cli/target
 
 # Roblox Studio lock files
 *.rbxlx.lock
