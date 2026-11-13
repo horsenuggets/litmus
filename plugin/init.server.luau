@@ -78,7 +78,7 @@ studio.ThemeChanged:Connect(function(): ()
     button.Icon = themedIcon()
 end)
 
--- Whether this place answers `litmus run`; this holds whether or not the control window is showing
+-- Whether this place answers `litmus test`; this holds whether or not the control window is showing
 local connected: flux.Value<boolean> = scope:value(plugin:GetSetting(CONNECTED_SETTING) == true)
 
 local shown: flux.Value<Shown?> = scope:value(nil :: Shown?)
