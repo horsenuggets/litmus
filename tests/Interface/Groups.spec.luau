@@ -1,4 +1,4 @@
-local litmus = require("../../Packages/Litmus")
+local litmus = require("../../Litmus")
 
 local group = litmus.group
 local test = litmus.test

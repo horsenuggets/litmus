@@ -1,5 +1,5 @@
 local environment = require("../Utils/Environment")
-local litmus = require("../../Packages/Litmus")
+local litmus = require("../../Litmus")
 local token = require("../Utils/Token")
 
 local expect = litmus.expect

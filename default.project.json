@@ -4,11 +4,8 @@
   "tree": {
     "$className": "DataModel",
     "ReplicatedStorage": {
-      "Packages": {
-        "$className": "Folder",
-        "Litmus": {
-          "$path": "lib"
-        }
+      "Litmus": {
+        "$path": "lib"
       },
       "Tests": {
         "$path": "tests"

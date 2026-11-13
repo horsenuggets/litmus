@@ -3,7 +3,7 @@
 
 local replicatedStorage = game:GetService("ReplicatedStorage")
 
-local lib = replicatedStorage.Packages.Litmus
+local lib = replicatedStorage.Litmus
 local tests = replicatedStorage.Tests
 
 type Failure = {
