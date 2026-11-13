@@ -18,7 +18,7 @@ local function resolvePath(from: ModuleScript, path: string): Instance?
 
     local current: Instance? = rootToInstance[root]
     if not current then
-        error(`[Litmus]: {from:GetFullName()} required "{path}", but "{root}" leads nowhere; a path starts with ./, ../, @self or @game`, 0)
+        error(`[Litmus]: can't require "{path}": "{root}" leads nowhere; a path starts with ./, ../, @self or @game`, 0)
     end
 
     for index = 2, #names do
@@ -59,7 +59,7 @@ function external.resolve(from: ModuleScript, target: unknown): ModuleScript
     end
 
     if not found or not found:IsA("ModuleScript") then
-        error(`[Litmus]: {from:GetFullName()} required "{tostring(target)}", which isn't a ModuleScript`, 0)
+        error(`[Litmus]: can't require "{tostring(target)}": there is no ModuleScript at that path`, 0)
     end
 
     return found
