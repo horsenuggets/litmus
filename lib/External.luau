@@ -34,7 +34,12 @@ local function resolvePath(from: ModuleScript, path: string): Instance?
 end
 
 local function addIfSpec(specs: { ModuleScript }, instance: Instance): ()
-    if instance:IsA("ModuleScript") and string.sub(instance.Name, -#SPEC_SUFFIX) == SPEC_SUFFIX then
+    if not instance:IsA("ModuleScript") or string.sub(instance.Name, -#SPEC_SUFFIX) ~= SPEC_SUFFIX then
+        return
+    end
+
+    -- One root can sit inside another, and a spec under both still runs once
+    if not table.find(specs, instance) then
         table.insert(specs, instance)
     end
 end

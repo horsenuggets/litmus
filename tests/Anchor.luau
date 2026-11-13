@@ -237,7 +237,8 @@ if not chunk then
     error(`[Anchor]: {entry:GetFullName()} didn't compile: {problem}`, 0)
 end
 
-local results: { SpecResult } = chunk().run(lib, { tests })
+-- `tests.Interface` is given a second time on purpose: specs under two roots must still run once
+local results: { SpecResult } = chunk().run(lib, { tests, tests.Interface })
 
 compare("run", "spec count", #results, #EXPECTED)
 
