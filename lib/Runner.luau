@@ -2,7 +2,8 @@ local collector = require("./Collector")
 local failure = require("./Failure")
 local loader = require("./Loader")
 
-local SPEC_SUFFIX: string = ".spec"
+-- Annotated so analysis fails here if External stops providing what Host asks for
+local external: loader.Host = require("./External")
 
 export type TestResult = {
     name: string,
@@ -18,31 +19,7 @@ export type SpecResult = {
     failure: failure.Failure?,
 }
 
-local function addIfSpec(specs: { ModuleScript }, instance: Instance): ()
-    if instance:IsA("ModuleScript") and string.sub(instance.Name, -#SPEC_SUFFIX) == SPEC_SUFFIX then
-        table.insert(specs, instance)
-    end
-end
-
-local function findSpecs(roots: { Instance }): { ModuleScript }
-    local specs: { ModuleScript } = {}
-
-    for _, root in roots do
-        addIfSpec(specs, root)
-
-        for _, descendant in root:GetDescendants() do
-            addIfSpec(specs, descendant)
-        end
-    end
-
-    table.sort(specs, function(a: ModuleScript, b: ModuleScript): boolean
-        return a:GetFullName() < b:GetFullName()
-    end)
-
-    return specs
-end
-
-local function runSpec(session: loader.Class, spec: ModuleScript): SpecResult
+local function runSpec(session: loader.Class, spec: loader.Module): SpecResult
     collector.begin()
 
     local problem: failure.Failure? = failure.catch(function(): ()
@@ -63,7 +40,7 @@ local function runSpec(session: loader.Class, spec: ModuleScript): SpecResult
     end
 
     return {
-        path = spec:GetFullName(),
+        path = external.name(spec),
         tests = results,
         failure = problem,
     }
@@ -72,10 +49,10 @@ end
 local runner = {}
 
 -- `session` must be the one this lib was loaded through, or specs register with another copy
-function runner.run(session: loader.Class, roots: { Instance }): { SpecResult }
+function runner.run(session: loader.Class, roots: { any }): { SpecResult }
     local results: { SpecResult } = {}
 
-    for _, spec in findSpecs(roots) do
+    for _, spec in external.findSpecs(roots) do
         table.insert(results, runSpec(session, spec))
     end
 
