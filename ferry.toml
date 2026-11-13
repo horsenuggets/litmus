@@ -1,0 +1,6 @@
+input = "images"
+output = "plugin/ImageIds.luau"
+
+[creator]
+type = "group"
+id = 1040356200

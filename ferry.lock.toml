@@ -1,0 +1,8 @@
+# Written by ferry: every image it has uploaded, by content hash.
+# Commit this file.
+
+version = 1
+
+[group.1040356200]
+4aed209f37c6764ab4d095490ce448c077e3d04d563334dd96a9065ff52a548b = 124081897922229
+7dcfd33a2436aa24d1b438d2e5e1b9c4cc9983d9e58cbfe86ec04e4406fcc0dd = 136016097533439

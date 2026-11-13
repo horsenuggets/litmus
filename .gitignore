@@ -11,3 +11,6 @@ sourcemap.json
 
 # Luau-lsp
 luau-cache
+
+# Ferry files
+.env

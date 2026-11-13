@@ -7,3 +7,4 @@
 luau-lsp = "JohnnyMorganz/luau-lsp@1.70.1"
 lune = "lune-org/lune@0.11.1"
 rojo = "rojo-rbx/rojo@7.7.1"
+ferry = "wobletstudios/ferry@0.1.0"
