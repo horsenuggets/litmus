@@ -23,6 +23,24 @@ local function positionIn(message: string): (string?, number?)
     return source, tonumber(line)
 end
 
+-- The caller's own frame at or above `level`, or nothing if the walk reaches `catch`, this module's next frame up, first
+local function findCaller(level: number): (string?, number?)
+    -- `level` is as the function calling this counts it, and this function's own frame sits one below
+    level += 1
+
+    local source: string, line: number = debug.info(level, "sl")
+    while source ~= OWN_SOURCE do
+        if line > 0 and not isLib(source) then
+            return source, line
+        end
+
+        level += 1
+        source, line = debug.info(level, "sl")
+    end
+
+    return nil, nil
+end
+
 local function describe(thrown: unknown): Failure
     if raised[thrown] then
         return thrown :: any
@@ -38,31 +56,18 @@ local function describe(thrown: unknown): Failure
         source, line = debug.info(level, "sl")
     end
 
-    local trace: string = debug.traceback(nil, level)
-
-    -- An error this lib raised on the caller's behalf belongs to the caller's line; `catch` is where the search ends
-    local callerLevel: number = level
-    local callerSource: string, callerLine: number = source, line
-    while callerSource ~= OWN_SOURCE and (callerLine <= 0 or isLib(callerSource)) do
-        callerLevel += 1
-        callerSource, callerLine = debug.info(callerLevel, "sl")
-    end
-
-    if callerSource ~= OWN_SOURCE then
-        source, line = callerSource, callerLine
-    else
+    -- An error this lib raised on the caller's behalf belongs to the caller's line
+    local callerSource: string?, callerLine: number? = findCaller(level)
+    if not callerSource then
         -- None of the caller's code was running, as when a spec doesn't compile; the message names the place
-        local namedSource: string?, namedLine: number? = positionIn(message)
-        if namedSource and namedLine then
-            source, line = namedSource, namedLine
-        end
+        callerSource, callerLine = positionIn(message)
     end
 
     return {
         message = message,
-        source = source,
-        line = line,
-        trace = trace,
+        source = callerSource or source,
+        line = callerLine or line,
+        trace = debug.traceback(nil, level),
     }
 end
 
