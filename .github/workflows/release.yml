@@ -12,27 +12,24 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            label: windows-x86_64
+          - system: windows
+            runner: windows-latest
+            targets: x86_64-pc-windows-msvc
 
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            label: macos-aarch64
+          # One runner builds for both kinds of Mac, since macOS runners are the slowest to come by
+          - system: macos
+            runner: macos-latest
+            targets: aarch64-apple-darwin x86_64-apple-darwin
 
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            label: macos-x86_64
-
-    name: Build (${{ matrix.label }})
-    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.system }})
+    runs-on: ${{ matrix.runner }}
 
     defaults:
       run:
         shell: bash
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the tag against the CLI's version
         run: |
@@ -53,8 +50,8 @@ jobs:
       - name: Install the tools
         uses: CompeyDev/setup-rokit@v0.2.1
 
-      - name: Add the Rust target
-        run: rustup target add ${{ matrix.target }}
+      - name: Add the Rust targets
+        run: rustup target add ${{ matrix.targets }}
 
       - name: Test
         working-directory: cli
@@ -62,26 +59,35 @@ jobs:
 
       - name: Build
         working-directory: cli
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: |
+          for target in ${{ matrix.targets }}; do
+            cargo build --release --locked --target "$target"
+          done
 
       # Rokit picks an archive by the system named in it, and takes the file inside that is named after the tool
       - name: Archive
         run: |
-          archive="litmus-${GITHUB_REF_NAME#v}-${{ matrix.label }}.zip"
-          cd "cli/target/${{ matrix.target }}/release"
+          mkdir archives
 
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            7z a "$GITHUB_WORKSPACE/$archive" litmus.exe
-          else
-            zip "$GITHUB_WORKSPACE/$archive" litmus
-          fi
+          for target in ${{ matrix.targets }}; do
+            # A target starts with its architecture, under the name Rokit knows it by
+            archive="$GITHUB_WORKSPACE/archives/litmus-${GITHUB_REF_NAME#v}-${{ matrix.system }}-${target%%-*}.zip"
 
-          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+            pushd "cli/target/$target/release"
 
-      - uses: actions/upload-artifact@v4
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              7z a "$archive" litmus.exe
+            else
+              zip "$archive" litmus
+            fi
+
+            popd
+          done
+
+      - uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.ARCHIVE }}
-          path: ${{ env.ARCHIVE }}
+          name: ${{ matrix.system }}
+          path: archives/*.zip
 
   # Runs only once every system has built, so a release never goes out with one missing
   publish:
@@ -93,7 +99,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: archives
           merge-multiple: true
