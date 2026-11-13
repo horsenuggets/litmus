@@ -51,7 +51,7 @@ local function studioColors(scope: flux.Scope, studioTheme: flux.UsedAs<StudioTh
     local pass: flux.Computed<Color3> = byTheme("#56D364", "#1A7F37")
     local fail: flux.Computed<Color3> = byTheme("#FF6B6B", "#CF222E")
     local errored: flux.Computed<Color3> = byTheme("#FFB042", "#B35900")
-    local mutedIcon: flux.Computed<Color3> = color(Enum.StudioStyleGuideColor.CheckedFieldIndicator, Enum.StudioStyleGuideModifier.Disabled)
+    local muted: flux.Computed<Color3> = color(Enum.StudioStyleGuideColor.CheckedFieldIndicator, Enum.StudioStyleGuideModifier.Disabled)
 
     return {
         isDark = isDark,
@@ -63,7 +63,6 @@ local function studioColors(scope: flux.Scope, studioTheme: flux.UsedAs<StudioTh
         text = color(Enum.StudioStyleGuideColor.MainText),
         brightText = color(Enum.StudioStyleGuideColor.BrightText),
         subText = color(Enum.StudioStyleGuideColor.SubText),
-        mutedIcon = mutedIcon,
 
         buttonText = color(Enum.StudioStyleGuideColor.ButtonText),
         buttonHover = color(Enum.StudioStyleGuideColor.ButtonText, Enum.StudioStyleGuideModifier.Selected),
@@ -75,7 +74,7 @@ local function studioColors(scope: flux.Scope, studioTheme: flux.UsedAs<StudioTh
         passGradient = gradient(pass),
         failGradient = gradient(fail),
         errorGradient = gradient(errored),
-        mutedGradient = gradient(mutedIcon),
+        mutedGradient = gradient(muted),
     }
 end
 

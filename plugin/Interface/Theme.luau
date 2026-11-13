@@ -11,7 +11,6 @@ export type Colors = {
     text: flux.Computed<Color3>,
     brightText: flux.Computed<Color3>,
     subText: flux.Computed<Color3>,
-    mutedIcon: flux.Computed<Color3>,
 
     buttonText: flux.Computed<Color3>,
     buttonHover: flux.Computed<Color3>,
