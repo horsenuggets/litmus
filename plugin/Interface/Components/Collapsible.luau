@@ -1,6 +1,6 @@
 local button = require("../../Packages/Interface/Hooks/Button")
 local flux = require("../../Packages/Flux")
-local icons = require("../Icons")
+local icon = require("./Icon")
 local theme = require("../Theme")
 
 export type Props = {
@@ -121,26 +121,19 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
                     Padding = UDim.new(0, theme.rowGap),
                 },
 
-                -- The layout places this holder, and the arrow turns inside it, out of the layout's hands
-                scope:element "Frame" {
-                    Name = "Arrow",
-                    LayoutOrder = 0,
+                icon(scope, {
+                    layoutOrder = 0,
 
-                    Size = UDim2.fromOffset(theme.iconSize, theme.iconSize),
+                    name = "chevron",
+                    gradient = colors.mutedGradient,
 
-                    scope:element "ImageLabel" {
-                        Name = "Image",
+                    -- A row that can't open keeps the arrow's room, so its head lines up with the rows that can
+                    transparency = if canOpen then 0 else 1,
 
-                        -- A row that can't open keeps the arrow's room, so its head lines up with the rows that can
-                        Image = icons.arrow,
-                        ImageColor3 = colors.subText,
-                        ImageTransparency = if canOpen then 0 else 1,
-
-                        Rotation = scope:computed(function(use: flux.Use): number
-                            return SHUT_ROTATION * (1 - use(openness))
-                        end),
-                    },
-                },
+                    rotation = scope:computed(function(use: flux.Use): number
+                        return SHUT_ROTATION * (1 - use(openness))
+                    end),
+                }),
 
                 props.head,
             },
