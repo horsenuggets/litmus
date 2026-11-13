@@ -8,10 +8,27 @@ export type Failure = {
 -- Tells a failure raised here apart from any other table a test might throw
 local raised: { [any]: true } = setmetatable({}, { __mode = "k" }) :: any
 
+local OWN_SOURCE: string = debug.info(1, "s")
+
+-- What every chunk name in this lib starts with, which is how its frames are told apart on the stack
+local LIB_PREFIX: string = string.match(OWN_SOURCE, "^(.*)Failure") or OWN_SOURCE
+
+local function isLib(source: string): boolean
+    return string.sub(source, 1, #LIB_PREFIX) == LIB_PREFIX
+end
+
+-- Reads the position Luau puts at the front of an error message, as in "Module:12: message"
+local function positionIn(message: string): (string?, number?)
+    local source: string?, line: string? = string.match(message, "^(.-):(%d+): ")
+    return source, tonumber(line)
+end
+
 local function describe(thrown: unknown): Failure
     if raised[thrown] then
         return thrown :: any
     end
+
+    local message: string = tostring(thrown)
 
     -- Level 1 is this handler; C functions such as `error` come next and have no line
     local level: number = 2
@@ -21,11 +38,31 @@ local function describe(thrown: unknown): Failure
         source, line = debug.info(level, "sl")
     end
 
+    local trace: string = debug.traceback(nil, level)
+
+    -- An error this lib raised on the caller's behalf belongs to the caller's line; `catch` is where the search ends
+    local callerLevel: number = level
+    local callerSource: string, callerLine: number = source, line
+    while callerSource ~= OWN_SOURCE and (callerLine <= 0 or isLib(callerSource)) do
+        callerLevel += 1
+        callerSource, callerLine = debug.info(callerLevel, "sl")
+    end
+
+    if callerSource ~= OWN_SOURCE then
+        source, line = callerSource, callerLine
+    else
+        -- None of the caller's code was running, as when a spec doesn't compile; the message names the place
+        local namedSource: string?, namedLine: number? = positionIn(message)
+        if namedSource and namedLine then
+            source, line = namedSource, namedLine
+        end
+    end
+
     return {
-        message = tostring(thrown),
+        message = message,
         source = source,
         line = line,
-        trace = debug.traceback(nil, level),
+        trace = trace,
     }
 end
 

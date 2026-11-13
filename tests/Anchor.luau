@@ -25,7 +25,7 @@ type SpecResult = {
     failure: Failure?,
 }
 
--- Lists only the fields to compare, leaving out engine wording and the lib's own line numbers
+-- Lists only the fields to compare, which leaves out engine wording
 type ExpectedFailure = {
     message: string?,
     source: string?,
@@ -133,6 +133,8 @@ local EXPECTED: { ExpectedSpec } = {
         tests = {},
         failure = {
             message = `[Litmus]: modules require each other in a cycle: {LOADER}.CycleA -> {LOADER}.CycleB -> {LOADER}.CycleA`,
+            source = `{LOADER}.CycleB`,
+            line = 1,
         },
     },
     {
@@ -149,7 +151,7 @@ local EXPECTED: { ExpectedSpec } = {
     {
         path = `{LOADER}.Syntax.spec`,
         tests = {},
-        failure = {},
+        failure = { source = `{LOADER}.Syntax.spec`, line = 2 },
     },
     {
         path = TOP_LEVEL_ERROR,
@@ -161,6 +163,8 @@ local EXPECTED: { ExpectedSpec } = {
         tests = {},
         failure = {
             message = `[Litmus]: {LOADER}.TwoValues returned 2 values; a module must return exactly one`,
+            source = `{LOADER}.TwoValues.spec`,
+            line = 1,
         },
     },
 }
