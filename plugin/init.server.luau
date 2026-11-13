@@ -71,7 +71,7 @@ local scope: flux.Scope = flux.scope()
 
 local studioTheme: flux.Value<StudioTheme> = scope:value(studio.Theme)
 theme.provide(scope, studioColors(scope, studioTheme))
-sources.provide(scope, place.sourceNamed)
+sources.provide(scope, place.sourceAt)
 
 studio.ThemeChanged:Connect(function(): ()
     studioTheme:set(studio.Theme)

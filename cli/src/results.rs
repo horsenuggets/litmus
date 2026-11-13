@@ -1,9 +1,10 @@
+use crate::manifest::InstancePath;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub struct Failure {
     pub message: String,
-    pub source: String,
+    pub source: InstancePath,
     pub line: u32,
 }
 
@@ -16,7 +17,7 @@ pub struct TestResult {
 
 #[derive(Deserialize)]
 pub struct SpecResult {
-    pub path: String,
+    pub path: InstancePath,
     pub tests: Vec<TestResult>,
 
     /// Set when the spec itself didn't load, in which case none of its tests ran
@@ -77,15 +78,15 @@ mod tests {
 
     #[test]
     fn counts_each_kind_of_spec() {
-        let failure = r#"{ "message": "m", "source": "s", "line": 1, "trace": "t" }"#;
+        let failure = r#"{ "message": "m", "source": ["s"], "line": 1, "trace": "t" }"#;
         let tally = tally(&format!(
             r#"[
-                {{ "path": "a", "tests": [{{ "name": "one", "groups": [] }}] }},
-                {{ "path": "b", "tests": [
+                {{ "path": ["a"], "tests": [{{ "name": "one", "groups": [] }}] }},
+                {{ "path": ["b"], "tests": [
                     {{ "name": "one", "groups": [] }},
                     {{ "name": "two", "groups": [], "failure": {failure} }}
                 ] }},
-                {{ "path": "c", "tests": [], "failure": {failure} }}
+                {{ "path": ["c"], "tests": [], "failure": {failure} }}
             ]"#
         ));
 
@@ -104,12 +105,12 @@ mod tests {
 
     #[test]
     fn passes_when_every_spec_did() {
-        assert!(tally(r#"[{ "path": "a", "tests": [{ "name": "one", "groups": [] }] }]"#).passed());
+        assert!(tally(r#"[{ "path": ["a"], "tests": [{ "name": "one", "groups": [] }] }]"#).passed());
     }
 
     #[test]
     fn does_not_pass_when_a_spec_never_loaded() {
-        let results = r#"[{ "path": "a", "tests": [], "failure": { "message": "m", "source": "s", "line": 1 } }]"#;
+        let results = r#"[{ "path": ["a"], "tests": [], "failure": { "message": "m", "source": ["s"], "line": 1 } }]"#;
         assert!(!tally(results).passed());
     }
 }

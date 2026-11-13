@@ -64,35 +64,9 @@ function place.findAll(paths: { bridge.Path }): { Instance }
     return found
 end
 
--- A full name joins names with dots, and a name can hold dots of its own, so every way of splitting it is tried
-local function descendByFullName(parent: Instance, fullName: string): Instance?
-    for _, child in parent:GetChildren() do
-        if child.Name == fullName then
-            return child
-        end
-
-        local prefix: string = `{child.Name}.`
-        if string.sub(fullName, 1, #prefix) == prefix then
-            local found: Instance? = descendByFullName(child, string.sub(fullName, #prefix + 1))
-            if found then
-                return found
-            end
-        end
-    end
-
-    return nil
-end
-
--- The source of the script `GetFullName` gives this name, if this place has it
-function place.sourceNamed(fullName: string): string?
-    local serviceName: string?, rest: string? = string.match(fullName, "^([^.]+)%.(.+)$")
-    if not serviceName or not rest then
-        return nil
-    end
-
-    local service: Instance? = game:FindFirstChild(serviceName)
-    local instance: Instance? = service and descendByFullName(service, rest)
-
+-- The source of the script at `path`, if this place has one there
+function place.sourceAt(path: bridge.Path): string?
+    local instance: Instance? = place.find(path)
     return instance and sourceOf(instance)
 end
 

@@ -1,7 +1,10 @@
+-- The names leading to a script from the top of the place
+export type Path = { string }
+
 -- The lib's results, as it returns them
 export type Failure = {
     message: string,
-    source: string,
+    source: Path,
     line: number,
     trace: string,
 }
@@ -13,7 +16,7 @@ export type TestResult = {
 }
 
 export type SpecResult = {
-    path: string,
+    path: Path,
     tests: { TestResult },
     failure: Failure?,
 }

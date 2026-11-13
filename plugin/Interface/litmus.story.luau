@@ -15,60 +15,52 @@ local CONTROL_SIZE: UDim2 = UDim2.fromOffset(320, 210)
 local RESULTS_SIZE: UDim2 = UDim2.fromOffset(560, 640)
 local GAP: number = 20
 
-local TESTS: string = "ReplicatedStorage.Tests"
+local function inTests(...: string): outcome.Path
+    return { "ReplicatedStorage", "Tests", ... }
+end
+
+-- The scripts the failures point at, which this place really has, so their lines of code show
+local EXPECT: outcome.Path = inTests("Anchor", "Interface", "Expect")
+local FAILURES: outcome.Path = inTests("Anchor", "Interface", "Failures")
+local THROWER: outcome.Path = inTests("Utils", "Thrower")
 
 -- One of each thing the results window has to show, in the shape the lib returns
 local SAMPLE_RESULTS: { outcome.SpecResult } = {
     {
-        path = `{TESTS}.Interface.Empty.spec`,
+        path = inTests("Interface", "Empty.spec"),
         tests = {},
     },
     {
-        path = `{TESTS}.Interface.Expect.spec`,
+        path = inTests("Interface", "Expect.spec"),
         tests = {
             { name = "passes on equal values", groups = { "equal" } },
             {
                 name = "fails on different values",
                 groups = { "equal" },
-                failure = {
-                    message = "expected 2, got 1",
-                    source = `{TESTS}.Interface.Expect.spec`,
-                    line = 13,
-                    trace = "",
-                },
+                failure = { message = "expected 2, got 1", source = EXPECT, line = 13, trace = "" },
             },
             { name = "passes on tables with the same contents", groups = { "same" } },
             {
                 name = "fails where a nested value differs",
                 groups = { "same" },
-                failure = {
-                    message = "expected 2, got 1 at outer.inner",
-                    source = `{TESTS}.Interface.Expect.spec`,
-                    line = 31,
-                    trace = "",
-                },
+                failure = { message = "expected 2, got 1 at outer.inner", source = EXPECT, line = 31, trace = "" },
             },
         },
     },
     {
-        path = `{TESTS}.Interface.Failures.spec`,
+        path = inTests("Interface", "Failures.spec"),
         tests = {
             {
                 name = "reports every line of a message",
                 groups = {},
-                failure = {
-                    message = "first line\nsecond line\nthird line",
-                    source = `{TESTS}.Interface.Failures.spec`,
-                    line = 9,
-                    trace = "",
-                },
+                failure = { message = "first line\nsecond line\nthird line", source = FAILURES, line = 9, trace = "" },
             },
             {
                 name = "reports a long message",
                 groups = {},
                 failure = {
                     message = `expected "{string.rep("right ", 30)}", got "{string.rep("left ", 30)}"`,
-                    source = `{TESTS}.Interface.Failures.spec`,
+                    source = FAILURES,
                     line = 13,
                     trace = "",
                 },
@@ -77,8 +69,8 @@ local SAMPLE_RESULTS: { outcome.SpecResult } = {
                 name = "points at the helper that threw",
                 groups = {},
                 failure = {
-                    message = `{TESTS}.Utils.Thrower:3: thrown from a helper`,
-                    source = `{TESTS}.Utils.Thrower`,
+                    message = "ReplicatedStorage.Tests.Utils.Thrower:3: thrown from a helper",
+                    source = THROWER,
                     line = 3,
                     trace = "",
                 },
@@ -86,17 +78,12 @@ local SAMPLE_RESULTS: { outcome.SpecResult } = {
             {
                 name = "names every group it sits in",
                 groups = { "outer", "inner" },
-                failure = {
-                    message = 'expected "expected", got "actual"',
-                    source = `{TESTS}.Interface.Failures.spec`,
-                    line = 31,
-                    trace = "",
-                },
+                failure = { message = 'expected "expected", got "actual"', source = FAILURES, line = 31, trace = "" },
             },
         },
     },
     {
-        path = `{TESTS}.Interface.Groups.spec`,
+        path = inTests("Interface", "Groups.spec"),
         tests = {
             { name = "sits outside every group", groups = {} },
             { name = "sits in one group", groups = { "outer" } },
@@ -106,33 +93,33 @@ local SAMPLE_RESULTS: { outcome.SpecResult } = {
         },
     },
     {
-        path = `{TESTS}.Interface.Single.spec`,
+        path = inTests("Interface", "Single.spec"),
         tests = {
             { name = "stands alone", groups = {} },
         },
     },
     {
-        path = `{TESTS}.Loader.Cycle.spec`,
+        path = inTests("Loader", "Cycle.spec"),
         tests = {},
         failure = {
-            message = `[Litmus]: modules require each other in a cycle: {TESTS}.Loader.CycleA -> {TESTS}.Loader.CycleB -> {TESTS}.Loader.CycleA`,
-            source = `{TESTS}.Loader.CycleB`,
+            message = "[Litmus]: modules require each other in a cycle: Loader.CycleA -> Loader.CycleB -> Loader.CycleA",
+            source = inTests("Anchor", "Loader", "CycleB"),
             line = 1,
             trace = "",
         },
     },
     {
-        path = `{TESTS}.Loader.MissingModule.spec`,
+        path = inTests("Loader", "MissingModule.spec"),
         tests = {},
         failure = {
             message = '[Litmus]: can\'t require "./Missing": there is no ModuleScript at that path',
-            source = `{TESTS}.Loader.MissingModule.spec`,
+            source = inTests("Anchor", "Loader", "MissingModule"),
             line = 1,
             trace = "",
         },
     },
     {
-        path = `{TESTS}.Loader.Requires.spec`,
+        path = inTests("Loader", "Requires.spec"),
         tests = {
             { name = "requires a sibling with ./", groups = {} },
             { name = "requires a child with @self", groups = {} },
@@ -149,8 +136,7 @@ local function story(target: Frame): () -> ()
     local shownTheme: flux.Value<StudioTheme> = scope:value(studio.Theme)
     theme.provide(scope, studioColors(scope, shownTheme))
 
-    -- The sample names scripts this place really has, so their lines of code show
-    sources.provide(scope, place.sourceNamed)
+    sources.provide(scope, place.sourceAt)
 
     local isDark: flux.Computed<boolean> = theme.colors(scope).isDark
 

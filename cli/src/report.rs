@@ -31,15 +31,15 @@ const LIB_TAG: &str = "[Litmus]: ";
 /// How many of a stale place's files get named before the rest are only counted
 const MAX_LISTED: usize = 10;
 
-/// Files by the dotted name the lib reports them under
-type Files<'a> = HashMap<String, &'a Path>;
+/// Files by the path the lib reports them under
+type Files<'a> = HashMap<&'a [String], &'a Path>;
 
 /// `columns` is how wide the terminal is, or nothing when the text isn't going to one
 pub fn render(results: &[SpecResult], manifest: &Manifest, columns: Option<usize>) -> String {
     let files: Files = manifest
         .scripts
         .iter()
-        .map(|script| (script.path.join("."), script.file.as_path()))
+        .map(|script| (script.path.as_slice(), script.file.as_path()))
         .collect();
 
     let name_width = results
@@ -162,11 +162,11 @@ pub fn unclaimed(mismatches: &[Mismatch]) -> String {
     lines.join("\n")
 }
 
-/// The file a name from the lib stands for, or the name itself when it isn't one of the project's
-fn name_of(name: &str, files: &Files) -> String {
+/// The file a path from the lib stands for, or the path as Studio writes it when it isn't one of the project's
+fn name_of(path: &[String], files: &Files) -> String {
     files
-        .get(name)
-        .map_or_else(|| name.to_owned(), |file| file.display().to_string())
+        .get(path)
+        .map_or_else(|| path.join("."), |file| file.display().to_string())
 }
 
 /// `path:line: message`, the form a terminal turns into a link, with the message's further lines kept under its first
@@ -224,7 +224,8 @@ fn wrap(text: &str, width: Option<usize>) -> Vec<String> {
 
 /// Luau starts a thrown message with where it was thrown, which the location beside it already says
 fn tidy(failure: &Failure) -> &str {
-    let position = format!("{}:{}: ", failure.source, failure.line);
+    // The position names the script the way Studio does, with dots between the names
+    let position = format!("{}:{}: ", failure.source.join("."), failure.line);
     let message = failure.message.strip_prefix(&position).unwrap_or(&failure.message);
 
     message.strip_prefix(LIB_TAG).unwrap_or(message)
@@ -296,17 +297,17 @@ mod tests {
     fn shows_each_kind_of_spec() {
         let text = plain(
             r#"[
-                { "path": "ReplicatedStorage.Bad.spec", "tests": [
+                { "path": ["ReplicatedStorage", "Bad.spec"], "tests": [
                     { "name": "adds", "groups": [] },
                     { "name": "subtracts", "groups": ["math", "minus"], "failure": {
-                        "message": "expected 2, got 1", "source": "ReplicatedStorage.Bad.spec", "line": 9, "trace": "t"
+                        "message": "expected 2, got 1", "source": ["ReplicatedStorage", "Bad.spec"], "line": 9, "trace": "t"
                     } }
                 ] },
-                { "path": "ReplicatedStorage.Broken.spec", "tests": [], "failure": {
+                { "path": ["ReplicatedStorage", "Broken.spec"], "tests": [], "failure": {
                     "message": "[Litmus]: ReplicatedStorage.Helper returned 2 values; a module must return exactly one",
-                    "source": "ReplicatedStorage.Broken.spec", "line": 1, "trace": "t"
+                    "source": ["ReplicatedStorage", "Broken.spec"], "line": 1, "trace": "t"
                 } },
-                { "path": "ReplicatedStorage.Good.spec", "tests": [{ "name": "works", "groups": [] }] }
+                { "path": ["ReplicatedStorage", "Good.spec"], "tests": [{ "name": "works", "groups": [] }] }
             ]"#,
         );
 
@@ -330,7 +331,7 @@ mod tests {
     #[test]
     fn leaves_out_counts_of_nothing() {
         let text = plain(
-            r#"[{ "path": "ReplicatedStorage.Good.spec", "tests": [{ "name": "works", "groups": [] }] }]"#,
+            r#"[{ "path": ["ReplicatedStorage", "Good.spec"], "tests": [{ "name": "works", "groups": [] }] }]"#,
         );
 
         assert!(text.contains(" Specs  1 passed\n Tests  1 passed\n"), "{text}");
@@ -339,8 +340,8 @@ mod tests {
     #[test]
     fn drops_the_position_luau_puts_in_front_of_a_message() {
         let text = plain(
-            r#"[{ "path": "ReplicatedStorage.Bad.spec", "tests": [{ "name": "throws", "groups": [], "failure": {
-                "message": "ReplicatedStorage.Helper:4: boom\nsecond line", "source": "ReplicatedStorage.Helper", "line": 4, "trace": "t"
+            r#"[{ "path": ["ReplicatedStorage", "Bad.spec"], "tests": [{ "name": "throws", "groups": [], "failure": {
+                "message": "ReplicatedStorage.Helper:4: boom\nsecond line", "source": ["ReplicatedStorage", "Helper"], "line": 4, "trace": "t"
             } }] }]"#,
         );
 
@@ -353,15 +354,38 @@ mod tests {
     }
 
     #[test]
+    fn tells_a_name_with_a_dot_from_two_names() {
+        let script = |path: &[&str], file: &str| Script {
+            path: path.iter().map(|name| (*name).to_owned()).collect(),
+            hash: String::new(),
+            file: file.into(),
+        };
+
+        let manifest = Manifest {
+            project: "demo".to_owned(),
+            scripts: vec![
+                script(&["Shared", "Util.spec"], "src/Util.spec.luau"),
+                script(&["Shared", "Util", "spec"], "src/Util/spec.luau"),
+            ],
+        };
+
+        let results: Vec<SpecResult> =
+            serde_json::from_str(r#"[{ "path": ["Shared", "Util", "spec"], "tests": [] }]"#).unwrap();
+        let text = anstream::adapter::strip_str(&render(&results, &manifest, None)).to_string();
+
+        assert!(text.contains("src/Util/spec.luau"), "{text}");
+    }
+
+    #[test]
     fn keeps_passing_specs_together_and_others_apart() {
         let text = plain(
             r#"[
-                { "path": "ReplicatedStorage.Good.spec", "tests": [] },
-                { "path": "ReplicatedStorage.Good.spec", "tests": [] },
-                { "path": "ReplicatedStorage.Broken.spec", "tests": [], "failure": {
-                    "message": "boom", "source": "ReplicatedStorage.Broken.spec", "line": 1, "trace": "t"
+                { "path": ["ReplicatedStorage", "Good.spec"], "tests": [] },
+                { "path": ["ReplicatedStorage", "Good.spec"], "tests": [] },
+                { "path": ["ReplicatedStorage", "Broken.spec"], "tests": [], "failure": {
+                    "message": "boom", "source": ["ReplicatedStorage", "Broken.spec"], "line": 1, "trace": "t"
                 } },
-                { "path": "ReplicatedStorage.Good.spec", "tests": [] }
+                { "path": ["ReplicatedStorage", "Good.spec"], "tests": [] }
             ]"#,
         );
 
@@ -383,8 +407,8 @@ mod tests {
 
     #[test]
     fn wraps_a_long_message_between_words_in_its_own_column() {
-        let results = r#"[{ "path": "ReplicatedStorage.Bad.spec", "tests": [{ "name": "wraps", "groups": [], "failure": {
-            "message": "one two three four five six seven eight nine ten\n  indented stays", "source": "ReplicatedStorage.Helper", "line": 4, "trace": "t"
+        let results = r#"[{ "path": ["ReplicatedStorage", "Bad.spec"], "tests": [{ "name": "wraps", "groups": [], "failure": {
+            "message": "one two three four five six seven eight nine ten\n  indented stays", "source": ["ReplicatedStorage", "Helper"], "line": 4, "trace": "t"
         } }] }]"#;
 
         let expected = "
@@ -400,8 +424,8 @@ mod tests {
 
     #[test]
     fn leaves_wrapping_to_a_terminal_too_narrow_for_a_column() {
-        let results = r#"[{ "path": "ReplicatedStorage.Bad.spec", "tests": [{ "name": "wraps", "groups": [], "failure": {
-            "message": "one two three four five six seven eight nine ten", "source": "ReplicatedStorage.Helper", "line": 4, "trace": "t"
+        let results = r#"[{ "path": ["ReplicatedStorage", "Bad.spec"], "tests": [{ "name": "wraps", "groups": [], "failure": {
+            "message": "one two three four five six seven eight nine ten", "source": ["ReplicatedStorage", "Helper"], "line": 4, "trace": "t"
         } }] }]"#;
 
         let text = plain_at(results, Some(24 + 29));

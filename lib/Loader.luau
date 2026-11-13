@@ -5,7 +5,9 @@ export type Module = any
 
 -- What the lib needs from the platform it runs on; External is the implementation
 export type Host = {
+    -- What `load` runs the module's chunk under
     name: (module: Module) -> string,
+    path: (module: Module) -> { string },
     resolve: (from: Module, target: unknown) -> Module,
     load: (module: Module, globals: { [string]: any }) -> (...any) -> ...any,
     findSpecs: (roots: { any }) -> { Module },
@@ -25,6 +27,7 @@ loader.__index = loader
 type Members = {
     _host: Host,
     _loaded: { [Module]: Loaded },
+    _named: { [string]: Module },
 }
 
 export type Class = setmetatable<Members, typeof(loader)>
@@ -33,6 +36,7 @@ function loader.new(host: Host): Class
     local self: Class = (setmetatable({}, loader) :: any)
     self._host = host
     self._loaded = {}
+    self._named = {}
     return self
 end
 
@@ -56,6 +60,9 @@ end
 
 function loader._run(self: Class, module: Module, requirer: Link?): { n: number, [number]: any }
     local link: Link = { module = module, requirer = requirer }
+
+    -- Noted before loading, so a module that doesn't compile can still be found by the name its error gives
+    self._named[self._host.name(module)] = module
 
     local chunk: (...any) -> ...any = self._host.load(module, {
         require = function(target: unknown): any
@@ -88,6 +95,11 @@ end
 
 function loader.require(self: Class, module: Module): any
     return self:_load(module, nil)
+end
+
+-- The module whose chunk runs under `name`, if this session has run it
+function loader.named(self: Class, name: string): Module?
+    return self._named[name]
 end
 
 -- For a spec: runs it for what it registers, caching nothing and ignoring what it returns

@@ -44,7 +44,7 @@ local function results(scope: flux.Scope, props: Props): Frame
         return nil
     end)
 
-    local function rowsOf(building: flux.Scope, shown: { outcome.SpecResult }, root: string): { Instance }
+    local function rowsOf(building: flux.Scope, shown: { outcome.SpecResult }, root: outcome.Path): { Instance }
         local rows: { Instance } = {}
 
         for index, spec in shown do
@@ -55,7 +55,7 @@ local function results(scope: flux.Scope, props: Props): Frame
     end
 
     -- Passing specs fold behind a labelled line while anything is wrong, so what needs attention is all that shows
-    local function foldOf(building: flux.Scope, passed: { outcome.SpecResult }, root: string, layoutOrder: number): Frame
+    local function foldOf(building: flux.Scope, passed: { outcome.SpecResult }, root: outcome.Path, layoutOrder: number): Frame
         local tests: number = 0
         for _, spec in passed do
             tests += #spec.tests
@@ -113,12 +113,12 @@ local function results(scope: flux.Scope, props: Props): Frame
         end
 
         -- Worked out over every spec, so narrowing the list doesn't change how a row's path reads
-        local specPaths: { string } = {}
+        local specPaths: { outcome.Path } = {}
         for index, spec in ran.results do
             specPaths[index] = spec.path
         end
 
-        local root: string = paths.sharedParent(specPaths)
+        local root: outcome.Path = paths.sharedParent(specPaths)
         local wrong: { outcome.SpecResult }, passed: { outcome.SpecResult } = outcome.arranged(ran.results, only)
 
         if #wrong == 0 then

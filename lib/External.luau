@@ -46,8 +46,22 @@ end
 
 local external = {}
 
+-- What a module's chunk runs under, and so what errors and tracebacks call it
 function external.name(module: ModuleScript): string
     return module:GetFullName()
+end
+
+-- The names leading to a module from the top of the place, kept apart since a name can hold dots of its own
+function external.path(module: ModuleScript): { string }
+    local names: { string } = {}
+    local current: Instance? = module
+
+    while current and current ~= game do
+        table.insert(names, 1, current.Name)
+        current = current.Parent
+    end
+
+    return names
 end
 
 function external.resolve(from: ModuleScript, target: unknown): ModuleScript
@@ -67,7 +81,7 @@ end
 
 function external.load(module: ModuleScript, globals: { [string]: any }): (...any) -> ...any
     -- The "=" makes errors and tracebacks print the name bare, as they do for a real script
-    local chunk: ((...any) -> ...any)?, problem: string? = loadstring(module.Source, `={module:GetFullName()}`)
+    local chunk: ((...any) -> ...any)?, problem: string? = loadstring(module.Source, `={external.name(module)}`)
     if not chunk then
         error(problem, 0)
     end

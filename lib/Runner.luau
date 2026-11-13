@@ -5,19 +5,46 @@ local loader = require("./Loader")
 -- Annotated so analysis fails here if External stops providing what Host asks for
 local external: loader.Host = require("./External")
 
+export type Failure = {
+    message: string,
+
+    -- The names leading to the script from the top of the place
+    source: { string },
+    line: number,
+    trace: string,
+}
+
 export type TestResult = {
     name: string,
     groups: { string },
-    failure: failure.Failure?,
+    failure: Failure?,
 }
 
 export type SpecResult = {
-    path: string,
+    path: { string },
     tests: { TestResult },
 
     -- Set when the spec itself didn't load, in which case none of its tests ran
-    failure: failure.Failure?,
+    failure: Failure?,
 }
+
+-- A failure knows its script only by the name the chunk ran under, which the session turns back into the script
+local function report(session: loader.Class, caught: failure.Failure?): Failure?
+    if not caught then
+        return nil
+    end
+
+    local module: loader.Module? = session:named(caught.source)
+
+    return {
+        message = caught.message,
+
+        -- A chunk the session never ran has nothing but that name to go by
+        source = if module ~= nil then external.path(module) else { caught.source },
+        line = caught.line,
+        trace = caught.trace,
+    }
+end
 
 local function runSpec(session: loader.Class, spec: loader.Module): SpecResult
     collector.begin()
@@ -34,15 +61,15 @@ local function runSpec(session: loader.Class, spec: loader.Module): SpecResult
             table.insert(results, {
                 name = test.name,
                 groups = test.groups,
-                failure = failure.catch(test.run),
+                failure = report(session, failure.catch(test.run)),
             })
         end
     end
 
     return {
-        path = external.name(spec),
+        path = external.path(spec),
         tests = results,
-        failure = problem,
+        failure = report(session, problem),
     }
 end
 

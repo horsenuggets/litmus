@@ -14,7 +14,7 @@ export type Props = {
     spec: outcome.SpecResult,
 
     -- The start of the spec's path that every spec shares, which the row leaves out
-    root: string,
+    root: outcome.Path,
 
     layoutOrder: number?,
 }
@@ -30,7 +30,6 @@ local function specRow(scope: flux.Scope, props: Props): Frame
 
     local status: outcome.Status = outcome.statusOf(spec)
     local style: statusStyle.Style = statusStyle(scope, status)
-    local name: string, parent: string = paths.split(spec.path)
 
     local specFailure: outcome.Failure? = spec.failure
     local hasDetails: boolean = specFailure ~= nil or #spec.tests > 0
@@ -54,7 +53,7 @@ local function specRow(scope: flux.Scope, props: Props): Frame
             label(scope, {
                 layoutOrder = 2,
 
-                text = name,
+                text = paths.name(spec.path),
                 font = theme.boldFont,
                 size = theme.bodyTextSize,
                 color = colors.brightText,
@@ -65,7 +64,7 @@ local function specRow(scope: flux.Scope, props: Props): Frame
                 layoutOrder = 3,
                 truncated = true,
 
-                text = paths.relativeTo(parent, props.root),
+                text = paths.shown(paths.relativeTo(paths.parent(spec.path), props.root)),
                 font = theme.mainFont,
                 size = theme.smallTextSize,
                 color = colors.subText,
