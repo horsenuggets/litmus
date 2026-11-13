@@ -9,6 +9,9 @@
       },
       "Tests": {
         "$path": "tests"
+      },
+      "Plugin": {
+        "$path": "plugin"
       }
     }
   }
