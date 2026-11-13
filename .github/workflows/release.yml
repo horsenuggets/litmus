@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows-x86_64
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            label: macos-aarch64
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            label: macos-x86_64
+
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag against the CLI's version
+        run: |
+          version=$(grep -m1 '^version = ' cli/Cargo.toml | cut -d '"' -f 2)
+
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::the tag is $GITHUB_REF_NAME, but cli/Cargo.toml says $version"
+            exit 1
+          fi
+
+      # Ferry is private, so Rokit would need a token of its own to install it, and nothing here runs it
+      - name: Leave Ferry out of the tools
+        run: |
+          grep -v '^ferry = ' rokit.toml > rokit.trimmed
+          mv rokit.trimmed rokit.toml
+
+      # The CLI's build script runs Rojo to build the plugin it carries
+      - name: Install the tools
+        uses: CompeyDev/setup-rokit@v0.2.1
+
+      - name: Add the Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Test
+        working-directory: cli
+        run: cargo test --locked
+
+      - name: Build
+        working-directory: cli
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      # Rokit picks an archive by the system named in it, and takes the file inside that is named after the tool
+      - name: Archive
+        run: |
+          archive="litmus-${GITHUB_REF_NAME#v}-${{ matrix.label }}.zip"
+          cd "cli/target/${{ matrix.target }}/release"
+
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "$GITHUB_WORKSPACE/$archive" litmus.exe
+          else
+            zip "$GITHUB_WORKSPACE/$archive" litmus
+          fi
+
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: ${{ env.ARCHIVE }}
+
+  # Runs only once every system has built, so a release never goes out with one missing
+  publish:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: archives
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" archives/*.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
