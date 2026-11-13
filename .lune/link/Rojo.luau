@@ -26,8 +26,14 @@ function rojo.build(output: string): ()
 end
 
 -- Writes the sourcemap luau-lsp reads, including the non-script instances that scripts index
-function rojo.sourcemap(output: string): ()
-    cli.run("rojo", { "sourcemap", "--include-non-scripts", "--output", output })
+-- `project` is a project file other than the default one
+function rojo.sourcemap(output: string, project: string?): ()
+    local args: { string } = { "sourcemap", "--include-non-scripts", "--output", output }
+    if project then
+        table.insert(args, project)
+    end
+
+    cli.run("rojo", args)
 end
 
 return rojo

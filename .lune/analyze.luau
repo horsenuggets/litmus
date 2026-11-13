@@ -1,10 +1,10 @@
 --[[
-    Type-checks `lib` and `tests` the way the editor does, listing each
-    problem once as a clickable `path:line:column`, and exiting 1 if there are
-    any.
+    Type-checks `lib`, `tests` and `plugin` the way the editor does, listing
+    each problem once as a clickable `path:line:column`, and exiting 1 if there
+    are any.
     Usage: lune run analyze [--full]
     `--full` shows long types and every reason in full.
-    Roblox's definitions and a private sourcemap live in `luau-cache`, so the
+    Roblox's definitions and private sourcemaps live in `luau-cache`, so the
     editor's `sourcemap.json` is left alone. Delete that folder to fetch newer
     definitions.
 ]]
@@ -19,13 +19,32 @@ local rojo = require "@link/Rojo"
 
 local CACHE_DIR: string = "luau-cache"
 local DEFS_FILE: string = `{CACHE_DIR}/globalTypes.d.luau`
-local SOURCEMAP_FILE: string = `{CACHE_DIR}/sourcemap.json`
 local DEFS_URL: string = "https://raw.githubusercontent.com/JohnnyMorganz/luau-lsp/main/scripts/globalTypes.d.luau"
 
-local PATHS: { string } = { "lib", "tests" }
+-- One run of the analyzer; each Rojo project needs its own, since requires resolve through its sourcemap
+type Pass = {
+    -- Left out for the default project
+    project: string?,
+    sourcemap: string,
+    paths: { string },
+    ignored: { string },
+}
 
--- Holds fixtures that are broken on purpose, to prove the loader reports them
-local IGNORED: { string } = { "tests/Loader/**" }
+local PASSES: { Pass } = {
+    {
+        sourcemap = `{CACHE_DIR}/sourcemap.json`,
+        paths = { "lib", "tests" },
+
+        -- Holds fixtures that are broken on purpose, to prove the loader reports them
+        ignored = { "tests/Loader/**" },
+    },
+    {
+        project = "plugin.project.json",
+        sourcemap = `{CACHE_DIR}/plugin-sourcemap.json`,
+        paths = { "plugin" },
+        ignored = {},
+    },
+}
 
 -- The analyzer asks for an editor feature it has no editor to give it; no setting turns this off
 local NO_CLIENT_WARNING: string = "[WARN] client does not allow didChangeWatchedFiles registration"
@@ -74,19 +93,19 @@ end
 
 -- Running the analyzer
 
-local function analyzerArgs(): { string }
+local function analyzerArgs(pass: Pass): { string }
     local args: { string } = {
         "analyze",
         `--defs={DEFS_FILE}`,
-        `--sourcemap={SOURCEMAP_FILE}`,
+        `--sourcemap={pass.sourcemap}`,
         "--flag:LuauSolverV2=true",
     }
 
-    for _, glob in IGNORED do
+    for _, glob in pass.ignored do
         table.insert(args, `--ignore={glob}`)
     end
 
-    for _, path in PATHS do
+    for _, path in pass.paths do
         table.insert(args, path)
     end
 
@@ -310,10 +329,23 @@ end
 cli.main(function(args: cli.ParsedArgs): ()
     ensureCacheDir()
     ensureDefs()
-    rojo.sourcemap(SOURCEMAP_FILE)
 
-    local result = cli.run("luau-lsp", analyzerArgs(), { check = false })
-    local parsed: { Problem }, unparsed: { string } = parseOutput(`{result.stdout}\n{result.stderr}`)
+    local output: { string } = {}
+    local failedCode: number? = nil
+
+    for _, pass in PASSES do
+        rojo.sourcemap(pass.sourcemap, pass.project)
+
+        local result = cli.run("luau-lsp", analyzerArgs(pass), { check = false })
+        table.insert(output, result.stdout)
+        table.insert(output, result.stderr)
+
+        if not result.ok then
+            failedCode = result.code
+        end
+    end
+
+    local parsed: { Problem }, unparsed: { string } = parseOutput(table.concat(output, "\n"))
 
     local problems: { Problem } = distinct(parsed)
     table.sort(problems, comesBefore)
@@ -327,8 +359,8 @@ cli.main(function(args: cli.ParsedArgs): ()
 
     if #problems > 0 then
         cli.fail("analyze", formatSummary(problems))
-    elseif not result.ok then
-        cli.fail("analyze", `luau-lsp exited with code {result.code} and no problems listed`)
+    elseif failedCode then
+        cli.fail("analyze", `luau-lsp exited with code {failedCode} and no problems listed`)
     end
 
     cli.success("analyze", "no problems found")
