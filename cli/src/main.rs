@@ -1,4 +1,5 @@
 mod manifest;
+mod plugin;
 mod report;
 mod results;
 mod server;
@@ -21,6 +22,8 @@ Usage: litmus <command>
 
 Commands:
   test                Run the project's .spec files in an open Studio place
+  plugin install      Install the Studio plugin, replacing any copy installed before
+  plugin uninstall    Remove the Studio plugin
 
 Options:
   -h, --help          Print this help
@@ -30,6 +33,8 @@ Options:
 #[derive(Debug, PartialEq)]
 enum Command {
     Test,
+    PluginInstall,
+    PluginUninstall,
     Help,
     Version,
 }
@@ -41,6 +46,8 @@ impl Command {
 
         match words.as_slice() {
             ["test"] => Some(Command::Test),
+            ["plugin", "install"] => Some(Command::PluginInstall),
+            ["plugin", "uninstall"] => Some(Command::PluginUninstall),
             ["--help" | "-h"] => Some(Command::Help),
             ["--version" | "-V"] => Some(Command::Version),
             _ => None,
@@ -51,6 +58,8 @@ impl Command {
     fn run(self) -> Result<bool, String> {
         match self {
             Command::Test => test(),
+            Command::PluginInstall => plugin::install().and(Ok(true)),
+            Command::PluginUninstall => plugin::uninstall().and(Ok(true)),
             Command::Help => {
                 print!("{HELP}");
                 Ok(true)
@@ -124,6 +133,8 @@ mod tests {
     #[test]
     fn reads_each_command() {
         assert_eq!(Command::parse(&["test"]), Some(Command::Test));
+        assert_eq!(Command::parse(&["plugin", "install"]), Some(Command::PluginInstall));
+        assert_eq!(Command::parse(&["plugin", "uninstall"]), Some(Command::PluginUninstall));
         assert_eq!(Command::parse(&["--help"]), Some(Command::Help));
         assert_eq!(Command::parse(&["-h"]), Some(Command::Help));
         assert_eq!(Command::parse(&["--version"]), Some(Command::Version));
@@ -134,6 +145,7 @@ mod tests {
     fn refuses_anything_else() {
         assert_eq!(Command::parse(&[] as &[&str]), None);
         assert_eq!(Command::parse(&["run"]), None);
+        assert_eq!(Command::parse(&["plugin"]), None);
         assert_eq!(Command::parse(&["test", "extra"]), None);
     }
 }
