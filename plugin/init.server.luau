@@ -58,7 +58,7 @@ local function answer(port: number, offer: bridge.Offer): ()
         bridge.reportError(port, offer.run, tostring(results))
         warn(`[Litmus]: couldn't run {offer.project}: {results}`)
     elseif bridge.reportResults(port, offer.run, results) then
-        print(`[Litmus]: ran {#results} specs for {offer.project}`)
+        print(`[Litmus]: ran {#results} specs for CLI`)
     else
         warn(`[Litmus]: ran {offer.project}, but couldn't send the results back`)
     end
@@ -109,6 +109,7 @@ end
 
 button.Click:Connect(function(): ()
     enabled = not enabled
+    
     plugin:SetSetting(ENABLED_SETTING, enabled)
     apply()
 end)
