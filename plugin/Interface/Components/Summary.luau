@@ -22,7 +22,7 @@ type Stat = {
 }
 
 local BAR_HEIGHT: number = 4
-local BAR_GAP: number = 4
+local BAR_GAP: number = 6
 
 -- A chip's own padding brings its dot to where the rows below start, so the strip itself keeps only the rest
 local STRIP_LEFT: number = 8
