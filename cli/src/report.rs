@@ -1,6 +1,7 @@
 use crate::manifest::Manifest;
+use crate::results::{Failure, SpecResult, Tally};
+use crate::server::Mismatch;
 use anstyle::{AnsiColor, Color, Style};
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -11,54 +12,25 @@ const RED: Style = AnsiColor::Red.on_default();
 const BOLD: Style = Style::new().bold();
 const DIM: Style = Style::new().dimmed();
 
+/// The longest label a badge holds, so that spec names start in one column whatever the badge says
+const LABEL_WIDTH: usize = "ERROR".len();
+
+const DETAIL_INDENT: &str = "     ";
+
 /// The lib tags its own errors with this, which says nothing once the CLI is the one printing them
 const LIB_TAG: &str = "[Litmus]: ";
 
-#[derive(Deserialize)]
-pub struct Failure {
-    message: String,
-    source: String,
-    line: u32,
-}
-
-#[derive(Deserialize)]
-pub struct TestResult {
-    name: String,
-    groups: Vec<String>,
-    failure: Option<Failure>,
-}
-
-#[derive(Deserialize)]
-pub struct SpecResult {
-    path: String,
-    tests: Vec<TestResult>,
-
-    /// Set when the spec itself didn't load, in which case none of its tests ran
-    failure: Option<Failure>,
-}
-
-pub struct Report {
-    pub text: String,
-    pub passed: bool,
-}
+/// How many of a stale place's files get named before the rest are only counted
+const MAX_LISTED: usize = 10;
 
 /// Files by the dotted name the lib reports them under
 type Files<'a> = HashMap<String, &'a Path>;
 
-#[derive(Default)]
-struct Tally {
-    passed_specs: usize,
-    failed_specs: usize,
-    errored_specs: usize,
-    passed_tests: usize,
-    failed_tests: usize,
-}
-
-pub fn render(results: &[SpecResult], manifest: &Manifest) -> Report {
+pub fn render(results: &[SpecResult], manifest: &Manifest) -> String {
     let files: Files = manifest
-        .files
+        .scripts
         .iter()
-        .map(|file| (file.path.join("."), file.file.as_path()))
+        .map(|script| (script.path.join("."), script.file.as_path()))
         .collect();
 
     let width = results
@@ -68,83 +40,108 @@ pub fn render(results: &[SpecResult], manifest: &Manifest) -> Report {
         .unwrap_or(0);
 
     let mut lines: Vec<String> = vec![String::new()];
-    let mut tally = Tally::default();
-
     for spec in results {
-        let name = name_of(&spec.path, &files);
-
-        if let Some(failure) = &spec.failure {
-            tally.errored_specs += 1;
-
-            lines.push(format!(" {}  {name}", paint(FAIL_BADGE, " ERROR ")));
-            lines.push(describe(failure, &files, "     "));
-            lines.push(String::new());
-            continue;
-        }
-
-        let total = spec.tests.len();
-        let failed = spec.tests.iter().filter(|test| test.failure.is_some()).count();
-        tally.passed_tests += total - failed;
-        tally.failed_tests += failed;
-
-        if failed == 0 {
-            tally.passed_specs += 1;
-
-            let count = paint(DIM, &plural(total, "test"));
-            lines.push(format!(" {}   {name:<width$}  {count}", paint(PASS_BADGE, " PASS ")));
-            continue;
-        }
-
-        tally.failed_specs += 1;
-
-        let count = paint(DIM, &format!("{} of {total} passed", total - failed));
-        lines.push(format!(" {}   {name:<width$}  {count}", paint(FAIL_BADGE, " FAIL ")));
-
-        for test in &spec.tests {
-            if let Some(failure) = &test.failure {
-                let title = test
-                    .groups
-                    .iter()
-                    .chain([&test.name])
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .join(" > ");
-
-                lines.push(format!("   {} {title}", paint(RED, "✗")));
-                lines.push(describe(failure, &files, "     "));
-            }
-        }
-
-        lines.push(String::new());
+        lines.extend(spec_lines(spec, &files, width));
     }
 
     if lines.last().is_some_and(|line| !line.is_empty()) {
         lines.push(String::new());
     }
 
-    lines.push(format!(
-        " {}  {}",
-        paint(BOLD, "Specs"),
-        counts(&[
-            (tally.failed_specs, "failed", RED),
-            (tally.errored_specs, "errored", RED),
-            (tally.passed_specs, "passed", GREEN),
-        ])
-    ));
-    lines.push(format!(
-        " {}  {}",
-        paint(BOLD, "Tests"),
-        counts(&[
-            (tally.failed_tests, "failed", RED),
-            (tally.passed_tests, "passed", GREEN),
-        ])
-    ));
+    lines.extend(summary(&Tally::of(results)));
     lines.push(String::new());
 
-    Report {
-        text: lines.join("\n"),
-        passed: tally.failed_specs == 0 && tally.errored_specs == 0,
+    lines.join("\n")
+}
+
+/// A passing spec takes one line; any other is followed by what went wrong and a blank line
+fn spec_lines(spec: &SpecResult, files: &Files, width: usize) -> Vec<String> {
+    let name = name_of(&spec.path, files);
+
+    if let Some(failure) = &spec.failure {
+        return vec![
+            headline(FAIL_BADGE, "ERROR", &name, width, ""),
+            describe(failure, files),
+            String::new(),
+        ];
     }
+
+    let total = spec.tests.len();
+    let failed = spec.failed_tests().count();
+    if failed == 0 {
+        return vec![headline(PASS_BADGE, "PASS", &name, width, &plural(total, "test"))];
+    }
+
+    let note = format!("{} of {total} passed", total - failed);
+    let mut lines = vec![headline(FAIL_BADGE, "FAIL", &name, width, &note)];
+
+    for (test, failure) in spec.failed_tests() {
+        let title: Vec<&str> = test.groups.iter().chain([&test.name]).map(String::as_str).collect();
+
+        lines.push(format!("   {} {}", paint(RED, "✗"), title.join(" > ")));
+        lines.push(describe(failure, files));
+    }
+
+    lines.push(String::new());
+    lines
+}
+
+fn headline(style: Style, label: &str, name: &str, width: usize, note: &str) -> String {
+    let badge = paint(style, &format!(" {label} "));
+    let gap = " ".repeat(LABEL_WIDTH - label.len());
+
+    if note.is_empty() {
+        return format!(" {badge}{gap}  {name}");
+    }
+
+    format!(" {badge}{gap}  {name:<width$}  {}", paint(DIM, note))
+}
+
+fn summary(tally: &Tally) -> [String; 2] {
+    let specs = counts(&[
+        (tally.failed_specs, "failed", RED),
+        (tally.errored_specs, "errored", RED),
+        (tally.passed_specs, "passed", GREEN),
+    ]);
+    let tests = counts(&[
+        (tally.failed_tests, "failed", RED),
+        (tally.passed_tests, "passed", GREEN),
+    ]);
+
+    [
+        format!(" {}  {specs}", paint(BOLD, "Specs")),
+        format!(" {}  {tests}", paint(BOLD, "Tests")),
+    ]
+}
+
+/// Why no place took the run: either none holds the project, or the ones that do are behind the disk
+pub fn unclaimed(mismatches: &[Mismatch]) -> String {
+    if mismatches.is_empty() {
+        return "no open place holds this project; open it in Studio and switch the Litmus plugin on".to_owned();
+    }
+
+    let mut lines = vec!["no open place matches the code on disk; is rojo serving?".to_owned()];
+
+    for mismatch in mismatches {
+        lines.push(format!(
+            "  {}: {} differ, {} missing",
+            mismatch.place,
+            mismatch.differing.len(),
+            mismatch.missing.len()
+        ));
+
+        let paths = mismatch.differing.iter().chain(&mismatch.missing);
+        for path in paths.clone().take(MAX_LISTED) {
+            lines.push(format!("    {}", path.join(".")));
+        }
+
+        let unlisted = paths.count().saturating_sub(MAX_LISTED);
+        if unlisted > 0 {
+            lines.push(format!("    and {unlisted} more"));
+        }
+    }
+
+    lines.join("\n")
 }
 
 /// The file a name from the lib stands for, or the name itself when it isn't one of the project's
@@ -155,16 +152,16 @@ fn name_of(name: &str, files: &Files) -> String {
 }
 
 /// `path:line: message`, the form a terminal turns into a link
-fn describe(failure: &Failure, files: &Files, indent: &str) -> String {
+fn describe(failure: &Failure, files: &Files) -> String {
     let location = format!("{}:{}:", name_of(&failure.source, files), failure.line);
     let mut message = tidy(failure).lines();
 
     let mut lines = vec![format!(
-        "{indent}{} {}",
+        "{DETAIL_INDENT}{} {}",
         paint(DIM, &location),
         message.next().unwrap_or_default()
     )];
-    lines.extend(message.map(|line| format!("{indent}{line}")));
+    lines.extend(message.map(|line| format!("{DETAIL_INDENT}{line}")));
 
     lines.join("\n")
 }
@@ -210,10 +207,10 @@ fn paint(style: Style, text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::File;
+    use crate::manifest::Script;
 
     fn manifest() -> Manifest {
-        let file = |name: &str, file: &str| File {
+        let script = |name: &str, file: &str| Script {
             path: vec!["ReplicatedStorage".to_owned(), name.to_owned()],
             hash: String::new(),
             file: file.into(),
@@ -221,28 +218,23 @@ mod tests {
 
         Manifest {
             project: "demo".to_owned(),
-            files: vec![
-                file("Good.spec", "tests/Good.spec.luau"),
-                file("Bad.spec", "tests/Bad.spec.luau"),
-                file("Broken.spec", "tests/Broken.spec.luau"),
-                file("Helper", "src/Helper.luau"),
+            scripts: vec![
+                script("Good.spec", "tests/Good.spec.luau"),
+                script("Bad.spec", "tests/Bad.spec.luau"),
+                script("Broken.spec", "tests/Broken.spec.luau"),
+                script("Helper", "src/Helper.luau"),
             ],
         }
     }
 
-    fn plain(results: &str) -> Report {
+    fn plain(results: &str) -> String {
         let results: Vec<SpecResult> = serde_json::from_str(results).unwrap();
-        let report = render(&results, &manifest());
-
-        Report {
-            text: anstream::adapter::strip_str(&report.text).to_string(),
-            passed: report.passed,
-        }
+        anstream::adapter::strip_str(&render(&results, &manifest())).to_string()
     }
 
     #[test]
     fn shows_each_kind_of_spec() {
-        let report = plain(
+        let text = plain(
             r#"[
                 { "path": "ReplicatedStorage.Bad.spec", "tests": [
                     { "name": "adds", "groups": [] },
@@ -272,32 +264,40 @@ mod tests {
  Tests  1 failed, 2 passed
 ";
 
-        assert_eq!(report.text, expected);
-        assert!(!report.passed);
+        assert_eq!(text, expected);
     }
 
     #[test]
-    fn passes_when_nothing_failed() {
-        let report = plain(
+    fn leaves_out_counts_of_nothing() {
+        let text = plain(
             r#"[{ "path": "ReplicatedStorage.Good.spec", "tests": [{ "name": "works", "groups": [] }] }]"#,
         );
 
-        assert!(report.passed);
-        assert!(report.text.contains(" Specs  1 passed\n Tests  1 passed\n"), "{}", report.text);
+        assert!(text.contains(" Specs  1 passed\n Tests  1 passed\n"), "{text}");
     }
 
     #[test]
     fn drops_the_position_luau_puts_in_front_of_a_message() {
-        let report = plain(
+        let text = plain(
             r#"[{ "path": "ReplicatedStorage.Bad.spec", "tests": [{ "name": "throws", "groups": [], "failure": {
                 "message": "ReplicatedStorage.Helper:4: boom\nsecond line", "source": "ReplicatedStorage.Helper", "line": 4, "trace": "t"
             } }] }]"#,
         );
 
-        assert!(
-            report.text.contains("     src/Helper.luau:4: boom\n     second line\n"),
-            "{}",
-            report.text
-        );
+        assert!(text.contains("     src/Helper.luau:4: boom\n     second line\n"), "{text}");
+    }
+
+    #[test]
+    fn names_the_files_a_stale_place_is_behind_on() {
+        let mismatches: Vec<Mismatch> = serde_json::from_str(
+            r#"[{ "run": "r", "place": "Stale", "missing": [["ReplicatedStorage", "Gone"]], "differing": [["ReplicatedStorage", "Thing.spec"]] }]"#,
+        )
+        .unwrap();
+
+        let text = unclaimed(&mismatches);
+
+        assert!(text.contains("  Stale: 1 differ, 1 missing\n"), "{text}");
+        assert!(text.contains("    ReplicatedStorage.Thing.spec\n    ReplicatedStorage.Gone"), "{text}");
+        assert!(unclaimed(&[]).contains("no open place holds this project"));
     }
 }

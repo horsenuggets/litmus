@@ -21,7 +21,7 @@ struct Node {
 }
 
 #[derive(Serialize, Debug, PartialEq)]
-pub struct File {
+pub struct Script {
     pub path: InstancePath,
     pub hash: String,
 
@@ -34,7 +34,7 @@ pub struct File {
 #[derive(Debug)]
 pub struct Manifest {
     pub project: String,
-    pub files: Vec<File>,
+    pub scripts: Vec<Script>,
 }
 
 impl Manifest {
@@ -64,19 +64,19 @@ impl Manifest {
             ));
         }
 
-        let mut files = Vec::new();
-        collect(&root, &mut Vec::new(), project_dir, &mut files)?;
+        let mut scripts = Vec::new();
+        collect(&root, &mut Vec::new(), project_dir, &mut scripts)?;
 
         Ok(Manifest {
             project: root.name,
-            files,
+            scripts,
         })
     }
 
     pub fn specs(&self) -> Vec<&InstancePath> {
-        self.files
+        self.scripts
             .iter()
-            .map(|file| &file.path)
+            .map(|script| &script.path)
             .filter(|path| path.last().is_some_and(|name| name.ends_with(SPEC_SUFFIX)))
             .collect()
     }
@@ -86,7 +86,7 @@ fn collect(
     node: &Node,
     path: &mut InstancePath,
     project_dir: &Path,
-    files: &mut Vec<File>,
+    scripts: &mut Vec<Script>,
 ) -> Result<(), String> {
     for child in &node.children {
         path.push(child.name.clone());
@@ -95,14 +95,14 @@ fn collect(
             let source = fs::read(project_dir.join(file))
                 .map_err(|error| format!("couldn't read {}: {error}", file.display()))?;
 
-            files.push(File {
+            scripts.push(Script {
                 path: path.clone(),
                 hash: hash(&source),
                 file: file.clone(),
             });
         }
 
-        collect(child, path, project_dir, files)?;
+        collect(child, path, project_dir, scripts)?;
         path.pop();
     }
 
@@ -166,11 +166,11 @@ mod tests {
         let manifest = Manifest::from_sourcemap(SOURCEMAP.as_bytes(), &dir).unwrap();
         fs::remove_dir_all(&dir).unwrap();
 
-        let paths: Vec<String> = manifest.files.iter().map(|file| file.path.join("/")).collect();
+        let paths: Vec<String> = manifest.scripts.iter().map(|script| script.path.join("/")).collect();
 
         assert_eq!(manifest.project, "demo");
         assert_eq!(paths, ["ReplicatedStorage/Thing", "ReplicatedStorage/Thing.spec"]);
-        assert_eq!(manifest.specs(), [&manifest.files[1].path]);
+        assert_eq!(manifest.specs(), [&manifest.scripts[1].path]);
     }
 
     #[test]
@@ -179,7 +179,7 @@ mod tests {
         let manifest = Manifest::from_sourcemap(SOURCEMAP.as_bytes(), &dir).unwrap();
         fs::remove_dir_all(&dir).unwrap();
 
-        assert_eq!(manifest.files[0].hash, manifest.files[1].hash);
+        assert_eq!(manifest.scripts[0].hash, manifest.scripts[1].hash);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::manifest::{File, InstancePath, Manifest};
+use crate::manifest::{InstancePath, Manifest, Script};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -31,7 +31,7 @@ struct Offer<'a> {
     protocol: u32,
     project: &'a str,
     run: &'a str,
-    files: &'a [File],
+    files: &'a [Script],
     specs: Vec<&'a InstancePath>,
 }
 
@@ -101,7 +101,7 @@ impl Server {
             protocol: PROTOCOL,
             project: &manifest.project,
             run: &run,
-            files: &manifest.files,
+            files: &manifest.scripts,
             specs: manifest.specs(),
         })
         .map_err(|error| format!("couldn't write the offer: {error}"))?;
@@ -226,7 +226,7 @@ mod tests {
     fn manifest() -> Manifest {
         Manifest {
             project: "demo".to_owned(),
-            files: vec![File {
+            scripts: vec![Script {
                 path: vec!["ReplicatedStorage".to_owned(), "Thing.spec".to_owned()],
                 hash: "00".to_owned(),
                 file: "Thing.spec.luau".into(),
