@@ -17,7 +17,7 @@ export type Offer = {
 }
 
 -- The CLI takes the first of these that is free, so the two lists have to stay the same
-local PORTS: { number } = { 37100, 37101, 37102, 37103 }
+local PORTS: { number } = { 37100, 37101 }
 
 -- Raised whenever the plugin and the CLI would stop understanding each other
 local PROTOCOL: number = 1

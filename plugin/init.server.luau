@@ -17,7 +17,12 @@ local button: PluginToolbarButton = toolbar:CreateButton("Litmus", "Run this pla
 button.ClickableWhenViewportHidden = true
 
 local enabled: boolean = plugin:GetSetting(ENABLED_SETTING) == true
-local polling: boolean = false
+
+-- The ports whose loop is still running, so switching off and on again doesn't start a second one
+local watched: { [number]: true } = {}
+
+-- Held while a run is answered, so two terminals can't make this place run tests at the same time
+local answering: boolean = false
 
 -- The last run seen on each port that needs no further answer from this place
 local settled: { [number]: string } = {}
@@ -59,34 +64,46 @@ local function answer(port: number, offer: bridge.Offer): ()
     end
 end
 
-local function poll(): ()
-    polling = true
+-- One loop per port: Windows takes two seconds to refuse an idle port, and a shared round made every run wait for all of them
+local function watch(port: number): ()
+    watched[port] = true
 
     while enabled do
-        for _, port in bridge.PORTS do
-            local offer: bridge.Offer? = bridge.offer(port)
-            if not offer or settled[port] == offer.run then
-                continue
-            end
+        local started: number = os.clock()
 
+        local offer: bridge.Offer? = bridge.offer(port)
+        if offer and not answering and settled[port] ~= offer.run then
+            answering = true
             local ok: boolean, problem: unknown = pcall(answer, port, offer)
+            answering = false
+
             if not ok then
                 settled[port] = offer.run
                 warn(`[Litmus]: couldn't answer {offer.project}: {problem}`)
             end
         end
 
-        task.wait(POLL_SECONDS)
+        -- A refused request has already taken its time; only a quick answer needs the pause
+        local remaining: number = POLL_SECONDS - (os.clock() - started)
+        if remaining > 0 then
+            task.wait(remaining)
+        end
     end
 
-    polling = false
+    watched[port] = nil
 end
 
 local function apply(): ()
     button:SetActive(enabled)
 
-    if enabled and not polling then
-        task.spawn(poll)
+    if not enabled then
+        return
+    end
+
+    for _, port in bridge.PORTS do
+        if not watched[port] then
+            task.spawn(watch, port)
+        end
     end
 end
 

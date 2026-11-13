@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiny_http::{Method, Request, Response};
 
 /// The plugin polls exactly these, so the two lists have to stay the same
-const PORTS: [u16; 4] = [37100, 37101, 37102, 37103];
+const PORTS: [u16; 2] = [37100, 37101];
 
 /// Raised whenever the plugin and the CLI would stop understanding each other
 const PROTOCOL: u32 = 1;
@@ -72,17 +72,22 @@ pub struct Server {
 
 impl Server {
     pub fn open() -> Result<Server, String> {
-        for port in PORTS {
-            if let Ok(http) = tiny_http::Server::http(("127.0.0.1", port)) {
-                return Ok(Server { http, port });
-            }
-        }
+        PORTS.into_iter().find_map(Server::bind).ok_or_else(|| {
+            format!(
+                "ports {} to {} are all in use",
+                PORTS[0],
+                PORTS[PORTS.len() - 1]
+            )
+        })
+    }
 
-        Err(format!(
-            "ports {} to {} are all in use",
-            PORTS[0],
-            PORTS[PORTS.len() - 1]
-        ))
+    fn bind(port: u16) -> Option<Server> {
+        let http = tiny_http::Server::http(("127.0.0.1", port)).ok()?;
+
+        // Read back, since the tests bind port 0 to be given any free one
+        let port = http.server_addr().to_ip()?.port();
+
+        Some(Server { http, port })
     }
 
     pub fn port(&self) -> u16 {
@@ -121,6 +126,11 @@ impl Server {
             let Some(mut request) = received else {
                 continue;
             };
+
+            if !is_local(&request, self.port) {
+                respond(request, 403);
+                continue;
+            }
 
             let method = request.method().clone();
             let url = request.url().to_owned();
@@ -188,6 +198,14 @@ fn run_id() -> String {
     format!("{nanos:x}-{:x}", std::process::id())
 }
 
+/// A web page can only reach this port under a domain name of its own, and that name is what it sends as the host
+fn is_local(request: &Request, port: u16) -> bool {
+    request.headers().iter().any(|header| {
+        let host = header.value.as_str();
+        header.field.equiv("Host") && (host == "127.0.0.1" || host == format!("127.0.0.1:{port}"))
+    })
+}
+
 fn respond(request: Request, status: u16) {
     respond_with(request, status, "{}");
 }
@@ -217,10 +235,14 @@ mod tests {
 
     /// Plays the plugin's part: one request, returning the status and the body
     fn send(port: u16, method: &str, route: &str, body: &str) -> (u16, String) {
+        send_as(&format!("127.0.0.1:{port}"), port, method, route, body)
+    }
+
+    fn send_as(host: &str, port: u16, method: &str, route: &str, body: &str) -> (u16, String) {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         write!(
             stream,
-            "{method} {route} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+            "{method} {route} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
             body.len()
         )
         .unwrap();
@@ -235,7 +257,7 @@ mod tests {
     }
 
     fn serve(timeouts: Timeouts) -> (u16, thread::JoinHandle<Outcome>) {
-        let server = Server::open().unwrap();
+        let server = Server::bind(0).unwrap();
         let port = server.port();
         let handle = thread::spawn(move || server.serve(&manifest(), timeouts).unwrap());
 
@@ -316,6 +338,20 @@ mod tests {
             }
             other => panic!("expected no claim, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn requests_under_another_host_name_are_refused() {
+        let (port, handle) = serve(Timeouts {
+            claim: Duration::from_millis(500),
+            run: Duration::from_secs(1),
+        });
+
+        assert_eq!(send_as("evil.example", port, "GET", "/offer", "").0, 403);
+        assert_eq!(send_as(&format!("evil.example:{port}"), port, "GET", "/offer", "").0, 403);
+        assert_eq!(send_as("127.0.0.1", port, "GET", "/offer", "").0, 200);
+
+        assert!(matches!(handle.join().unwrap(), Outcome::Unclaimed(_)));
     }
 
     #[test]
