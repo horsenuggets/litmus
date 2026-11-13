@@ -29,35 +29,35 @@ local settled: { [number]: string } = {}
 
 local function answer(port: number, offer: bridge.Offer): ()
     if offer.protocol ~= bridge.PROTOCOL then
-        settled[port] = offer.run
+        settled[port] = offer.runId
         warn(`[Litmus]: {offer.project} speaks protocol {offer.protocol} and this plugin speaks {bridge.PROTOCOL}; update the older one`)
         return
     end
 
     local specs: { Instance } = place.findAll(offer.specs)
     if #specs == 0 then
-        settled[port] = offer.run
+        settled[port] = offer.runId
         return
     end
 
     -- Left unsettled, so a place Rojo is still syncing gets compared again on the next poll
     local comparison: place.Comparison = place.compare(offer.files)
     if #comparison.missing > 0 or #comparison.differing > 0 then
-        bridge.reportMismatch(port, offer.run, game.Name, comparison.missing, comparison.differing)
+        bridge.reportMismatch(port, offer.runId, game.Name, comparison.missing, comparison.differing)
         return
     end
 
-    settled[port] = offer.run
+    settled[port] = offer.runId
 
-    if not bridge.claim(port, offer.run, game.Name) then
+    if not bridge.claim(port, offer.runId, game.Name) then
         return
     end
 
     local ok: boolean, results: any = pcall(run.specs, specs)
     if not ok then
-        bridge.reportError(port, offer.run, tostring(results))
+        bridge.reportError(port, offer.runId, tostring(results))
         warn(`[Litmus]: couldn't run {offer.project}: {results}`)
-    elseif bridge.reportResults(port, offer.run, results) then
+    elseif bridge.reportResults(port, offer.runId, results) then
         print(`[Litmus]: ran {#results} specs for CLI`)
     else
         warn(`[Litmus]: ran {offer.project}, but couldn't send the results back`)
@@ -72,13 +72,13 @@ local function watch(port: number): ()
         local started: number = os.clock()
 
         local offer: bridge.Offer? = bridge.offer(port)
-        if offer and not answering and settled[port] ~= offer.run then
+        if offer and not answering and settled[port] ~= offer.runId then
             answering = true
             local ok: boolean, problem: unknown = pcall(answer, port, offer)
             answering = false
 
             if not ok then
-                settled[port] = offer.run
+                settled[port] = offer.runId
                 warn(`[Litmus]: couldn't answer {offer.project}: {problem}`)
             end
         end

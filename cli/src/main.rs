@@ -39,7 +39,11 @@ fn run() -> Result<bool, String> {
     let server = Server::open()?;
     eprintln!("litmus: waiting for Studio on port {}", server.port());
 
-    match server.serve(&manifest, Timeouts::default())? {
+    let outcome = server.serve(&manifest, Timeouts::default(), |place| {
+        eprintln!("litmus: running in {place}");
+    })?;
+
+    match outcome {
         Outcome::Results(results) => {
             let results: Vec<SpecResult> = serde_json::from_value(results).map_err(|error| {
                 format!("couldn't read the results, so the place's lib may not match this CLI: {error}")

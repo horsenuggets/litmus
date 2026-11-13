@@ -11,7 +11,7 @@ export type File = {
 export type Offer = {
     protocol: number,
     project: string,
-    run: string,
+    runId: string,
     files: { File },
     specs: { Path },
 }
@@ -61,7 +61,7 @@ function bridge.offer(port: number): Offer?
     end
 
     local decoded: boolean, offer: any = pcall(httpService.JSONDecode, httpService, body)
-    if not decoded or type(offer) ~= "table" or type(offer.run) ~= "string" then
+    if not decoded or type(offer) ~= "table" or type(offer.runId) ~= "string" then
         return nil
     end
 
@@ -70,21 +70,21 @@ end
 
 -- False when another place took the run first
 function bridge.claim(port: number, run: string, placeName: string): boolean
-    local ok: boolean = send(port, "POST", "/claim", { run = run, place = placeName })
+    local ok: boolean = send(port, "POST", "/claim", { runId = run,place = placeName })
     return ok
 end
 
 function bridge.reportMismatch(port: number, run: string, placeName: string, missing: { Path }, differing: { Path }): ()
-    send(port, "POST", "/mismatch", { run = run, place = placeName, missing = missing, differing = differing })
+    send(port, "POST", "/mismatch", { runId = run,place = placeName, missing = missing, differing = differing })
 end
 
 function bridge.reportResults(port: number, run: string, results: any): boolean
-    local ok: boolean = send(port, "POST", "/result", { run = run, results = results })
+    local ok: boolean = send(port, "POST", "/result", { runId = run,results = results })
     return ok
 end
 
 function bridge.reportError(port: number, run: string, message: string): boolean
-    local ok: boolean = send(port, "POST", "/result", { run = run, error = message })
+    local ok: boolean = send(port, "POST", "/result", { runId = run,error = message })
     return ok
 end
 

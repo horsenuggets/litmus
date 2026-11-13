@@ -290,7 +290,7 @@ mod tests {
     #[test]
     fn names_the_files_a_stale_place_is_behind_on() {
         let mismatches: Vec<Mismatch> = serde_json::from_str(
-            r#"[{ "run": "r", "place": "Stale", "missing": [["ReplicatedStorage", "Gone"]], "differing": [["ReplicatedStorage", "Thing.spec"]] }]"#,
+            r#"[{ "place": "Stale", "missing": [["ReplicatedStorage", "Gone"]], "differing": [["ReplicatedStorage", "Thing.spec"]] }]"#,
         )
         .unwrap();
 
