@@ -1,3 +1,4 @@
 {
-    "luau-lsp.fflags.enableNewSolver": true
+    "luau-lsp.fflags.enableNewSolver": true,
+    "luau-lsp.ignoreGlobs": ["tests/Loader/**"]
 }
