@@ -116,6 +116,7 @@ local EXPECTED: { ExpectedSpec } = {
                 groups = { "error" },
                 failure = { message = "expected an error, got none", source = EXPECT, line = 51 },
             },
+            { name = "passes on tables that contain themselves", groups = { "same" } },
         },
     },
     {

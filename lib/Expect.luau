@@ -13,7 +13,7 @@ local function extend(path: string, key: unknown): string
 end
 
 -- Describes where two values first differ, or returns nil when they match
-local function difference(actual: any, expected: any, path: string): string?
+local function difference(actual: any, expected: any, path: string, compared: { [any]: { [any]: true } }): string?
     if actual == expected then
         return nil
     end
@@ -23,8 +23,17 @@ local function difference(actual: any, expected: any, path: string): string?
         return `expected {show(expected)}, got {show(actual)}{place}`
     end
 
+    -- A table that contains itself leads back to a pair already taken up, which has nothing new to say
+    local partners: { [any]: true } = compared[actual] or {}
+    if partners[expected] then
+        return nil
+    end
+
+    compared[actual] = partners
+    partners[expected] = true
+
     for key: any, value: any in expected do
-        local found: string? = difference(actual[key], value, extend(path, key))
+        local found: string? = difference(actual[key], value, extend(path, key), compared)
         if found then
             return found
         end
@@ -32,7 +41,7 @@ local function difference(actual: any, expected: any, path: string): string?
 
     for key: any, value: any in actual do
         if expected[key] == nil then
-            return difference(value, nil, extend(path, key))
+            return difference(value, nil, extend(path, key), compared)
         end
     end
 
@@ -49,7 +58,7 @@ function expect.equal<T>(actual: T, expected: T): ()
 end
 
 function expect.same<T>(actual: T, expected: T): ()
-    local found: string? = difference(actual, expected, "")
+    local found: string? = difference(actual, expected, "", {})
     if found then
         failure.raise(found, 2)
     end
