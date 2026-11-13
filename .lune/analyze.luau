@@ -36,7 +36,7 @@ local PASSES: { Pass } = {
         paths = { "lib", "tests" },
 
         -- Holds fixtures that are broken on purpose, to prove the loader reports them
-        ignored = { "tests/Loader/**" },
+        ignored = { "tests/Anchor/Loader/**" },
     },
     {
         project = "plugin.project.json",

@@ -1,34 +1,53 @@
+local anchor = require("../Utils/Anchor")
 local litmus = require("../../Litmus")
-local thrower = require("../Utils/Thrower")
 
 local expect = litmus.expect
-local group = litmus.group
 local test = litmus.test
 
-test("reports every line of a message", function(): ()
-    error("first line\nsecond line\nthird line", 0)
+local ran: litmus.SpecResult = anchor.run("Interface", "Failures")
+
+test("keeps every line of a message", function(): ()
+    local failure: litmus.Failure = anchor.failureOf(ran, "reports every line of a message")
+
+    expect.equal(failure.message, "first line\nsecond line\nthird line")
 end)
 
-test("reports a long message", function(): ()
-    expect.equal(string.rep("left ", 30), string.rep("right ", 30))
+test("keeps a long message whole", function(): ()
+    local failure: litmus.Failure = anchor.failureOf(ran, "reports a long message")
+
+    expect.equal(failure.message, `expected "{string.rep("right ", 30)}", got "{string.rep("left ", 30)}"`)
 end)
 
-test("reports a thrown table", function(): ()
-    error({ code = 1 })
+test("points a failed expectation at the line that made it", function(): ()
+    local failure: litmus.Failure = anchor.failureOf(ran, "reports a long message")
+
+    expect.same(failure.source, { "Interface", "Failures.spec" })
+    expect.equal(failure.line, 13)
+end)
+
+test("finds the line of a thrown table", function(): ()
+    expect.equal(anchor.failureOf(ran, "reports a thrown table").line, 17)
 end)
 
 test("points at the helper that threw", function(): ()
-    thrower()
+    local failure: litmus.Failure = anchor.failureOf(ran, "points at the helper that threw")
+
+    expect.equal(failure.message, "ReplicatedStorage.Tests.Utils.Thrower:3: thrown from a helper")
+    expect.same(failure.source, { "ReplicatedStorage", "Tests", "Utils", "Thrower" })
+    expect.equal(failure.line, 3)
 end)
 
-test("points at a test registered while tests run", function(): ()
-    test("too late", function(): () end)
+test("points an error the lib raised at the test that caused it", function(): ()
+    local failure: litmus.Failure = anchor.failureOf(ran, "points at a test registered while tests run")
+
+    expect.equal(failure.message, "Interface.Failures.spec:25: [Litmus]: test called outside a spec")
+    expect.same(failure.source, { "Interface", "Failures.spec" })
+    expect.equal(failure.line, 25)
 end)
 
-group("outer", function(): ()
-    group("inner", function(): ()
-        test("names every group it sits in", function(): ()
-            expect.equal("actual", "expected")
-        end)
-    end)
+test("fails a test inside groups like any other", function(): ()
+    local failure: litmus.Failure = anchor.failureOf(ran, "names every group it sits in")
+
+    expect.equal(failure.message, 'expected "expected", got "actual"')
+    expect.equal(failure.line, 31)
 end)

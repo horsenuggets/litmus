@@ -1,4 +1,4 @@
-local litmus = require("../../Litmus")
+local litmus = require("@game/ReplicatedStorage/Litmus")
 
 local test = litmus.test
 
