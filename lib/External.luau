@@ -93,4 +93,18 @@ function external.findSpecs(roots: { Instance }): { ModuleScript }
     return specs
 end
 
+-- The way in: a script outside the lib loads this module alone, then hands it the lib to run through
+function external.run(lib: ModuleScript, roots: { Instance }): any
+    local loaderModule: Instance? = lib:FindFirstChild("Loader")
+    if not loaderModule or not loaderModule:IsA("ModuleScript") then
+        error(`[Litmus]: {lib:GetFullName()} has no Loader module`, 0)
+    end
+
+    local loader: any = external.load(loaderModule, {})()
+    local session: any = loader.new(external)
+
+    local litmus: any = session:require(lib)
+    return litmus.run(session, roots)
+end
+
 return external

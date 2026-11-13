@@ -229,21 +229,15 @@ local function compareTests(path: string, actual: { TestResult }, expected: { Ex
     end
 end
 
--- Loads a module that requires nothing, straight from its source so Studio's require cache stays out of it
-local function loadAlone(module: ModuleScript): any
-    local chunk: ((...any) -> ...any)?, problem: string? = loadstring(module.Source, `={module:GetFullName()}`)
-    if not chunk then
-        error(`[Anchor]: {module:GetFullName()} didn't compile: {problem}`, 0)
-    end
+local entry = lib.External
 
-    return chunk()
+-- Loaded straight from its source, so Studio's require cache stays out of it
+local chunk: ((...any) -> ...any)?, problem: string? = loadstring(entry.Source, `={entry:GetFullName()}`)
+if not chunk then
+    error(`[Anchor]: {entry:GetFullName()} didn't compile: {problem}`, 0)
 end
 
-local loader: any = loadAlone(lib.Loader)
-local session: any = loader.new(loadAlone(lib.External))
-
-local litmus: any = session:require(lib)
-local results: { SpecResult } = litmus.run(session, { tests })
+local results: { SpecResult } = chunk().run(lib, { tests })
 
 compare("run", "spec count", #results, #EXPECTED)
 

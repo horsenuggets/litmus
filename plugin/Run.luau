@@ -11,27 +11,20 @@ local function moduleIn(parent: Instance, name: string): ModuleScript
     return found
 end
 
--- Loads a module that requires nothing, straight from its source so Studio's require cache stays out of it
-local function loadAlone(module: ModuleScript): any
-    local chunk: ((...any) -> ...any)?, problem: string? = loadstring(module.Source, `={module:GetFullName()}`)
-    if not chunk then
-        error(`[Litmus]: {module:GetFullName()} didn't compile: {problem}`, 0)
-    end
-
-    return chunk()
-end
-
 local run = {}
 
 -- Runs through the place's own copy of the lib, so the specs and the runner share one
 function run.specs(specs: { Instance }): any
     local lib: ModuleScript = moduleIn(replicatedStorage, LIB_NAME)
+    local entry: ModuleScript = moduleIn(lib, "External")
 
-    local loader: any = loadAlone(moduleIn(lib, "Loader"))
-    local session: any = loader.new(loadAlone(moduleIn(lib, "External")))
+    -- Loaded straight from its source, so Studio's require cache stays out of it
+    local chunk: ((...any) -> ...any)?, problem: string? = loadstring(entry.Source, `={entry:GetFullName()}`)
+    if not chunk then
+        error(`[Litmus]: {entry:GetFullName()} didn't compile: {problem}`, 0)
+    end
 
-    local litmus: any = session:require(lib)
-    return litmus.run(session, specs)
+    return chunk().run(lib, specs)
 end
 
 return run

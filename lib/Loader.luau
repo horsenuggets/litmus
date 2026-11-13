@@ -1,4 +1,4 @@
--- Requires nothing, so an entry point can load this alone and load everything else through it
+-- Requires nothing, so the host can load this alone and load everything else through it
 
 -- A host's own handle for a module; `any` so each host can type it as what it really is
 export type Module = any
