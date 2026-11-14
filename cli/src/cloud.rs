@@ -25,13 +25,18 @@ pub struct Place {
     pub place: u64,
 }
 
-/// Runs the project's specs in a copy of it built for this run, and returns the results as the lib wrote them
-pub fn run(project_dir: &Path, manifest: &Manifest, place: &Place) -> Result<Value, String> {
+/// Runs the project's specs in a version of the place saved for this run, and returns the results as the lib wrote them
+pub fn run(project_dir: &Path, manifest: &Manifest, place: &Place, build: Option<&Path>) -> Result<Value, String> {
     let key = env::var(KEY_VARIABLE)
         .map_err(|_| format!("{KEY_VARIABLE} isn't set; --cloud runs under the Open Cloud API key it holds"))?;
     let client = Client::new(key);
 
-    let file = place::build(project_dir)?;
+    let file = match build {
+        // Taken at its word: nothing checks that it holds the code on disk, as the hashes do for a place in Studio
+        Some(build) => place::read(build)?,
+        None => place::build(project_dir)?,
+    };
+
     let version = client.upload(place, &file)?;
     eprintln!("litmus: running in version {version} of place {}", place.place);
 

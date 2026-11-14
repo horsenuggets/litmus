@@ -11,7 +11,7 @@ use serde_json::Value;
 use server::{Outcome, Server, Timeouts};
 use std::env;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use terminal_size::{Width, terminal_size_of};
 
@@ -31,6 +31,7 @@ Options for test:
   --cloud             Run in Roblox's cloud instead of Studio, under the API key in LITMUS_API_KEY
   --universe <id>     The experience to run in, with --cloud
   --place <id>        Its place to build the project into, as a new unpublished version, with --cloud
+  --build <file>      A .rbxl to use as that version, when Rojo alone doesn't build the whole place, with --cloud
 
 Options:
   -h, --help          Print this help
@@ -40,7 +41,12 @@ Options:
 #[derive(Debug, PartialEq)]
 enum Target {
     Studio,
-    Cloud(cloud::Place),
+    Cloud {
+        place: cloud::Place,
+
+        /// The place file to upload, when it isn't to be built from the project
+        build: Option<PathBuf>,
+    },
 }
 
 impl Target {
@@ -49,6 +55,7 @@ impl Target {
         let mut in_cloud = false;
         let mut universe = None;
         let mut place = None;
+        let mut build = None;
 
         let mut options = options.iter();
         while let Some(option) = options.next() {
@@ -56,13 +63,17 @@ impl Target {
                 "--cloud" => in_cloud = true,
                 "--universe" => universe = Some(options.next()?.parse().ok()?),
                 "--place" => place = Some(options.next()?.parse().ok()?),
+                "--build" => build = Some(PathBuf::from(options.next()?)),
                 _ => return None,
             }
         }
 
-        match (in_cloud, universe, place) {
-            (false, None, None) => Some(Target::Studio),
-            (true, Some(universe), Some(place)) => Some(Target::Cloud(cloud::Place { universe, place })),
+        match (in_cloud, universe, place, build) {
+            (false, None, None, None) => Some(Target::Studio),
+            (true, Some(universe), Some(place), build) => Some(Target::Cloud {
+                place: cloud::Place { universe, place },
+                build,
+            }),
             _ => None,
         }
     }
@@ -140,7 +151,7 @@ fn test(target: &Target) -> Result<bool, String> {
 
     let results = match target {
         Target::Studio => run_in_studio(&manifest)?,
-        Target::Cloud(place) => cloud::run(project_dir, &manifest, place)?,
+        Target::Cloud { place, build } => cloud::run(project_dir, &manifest, place, build.as_deref())?,
     };
 
     let results: Vec<SpecResult> = serde_json::from_value(results)
@@ -196,13 +207,22 @@ mod tests {
 
     #[test]
     fn reads_where_a_cloud_run_happens() {
-        let cloud = Some(Command::Test(Target::Cloud(cloud::Place {
-            universe: 11,
-            place: 22,
-        })));
+        let cloud = |build: Option<&str>| {
+            Some(Command::Test(Target::Cloud {
+                place: cloud::Place {
+                    universe: 11,
+                    place: 22,
+                },
+                build: build.map(PathBuf::from),
+            }))
+        };
 
-        assert_eq!(Command::parse(&["test", "--cloud", "--universe", "11", "--place", "22"]), cloud);
-        assert_eq!(Command::parse(&["test", "--place", "22", "--universe", "11", "--cloud"]), cloud);
+        assert_eq!(Command::parse(&["test", "--cloud", "--universe", "11", "--place", "22"]), cloud(None));
+        assert_eq!(Command::parse(&["test", "--place", "22", "--universe", "11", "--cloud"]), cloud(None));
+        assert_eq!(
+            Command::parse(&["test", "--cloud", "--universe", "11", "--place", "22", "--build", "build.rbxl"]),
+            cloud(Some("build.rbxl"))
+        );
     }
 
     #[test]
@@ -212,5 +232,7 @@ mod tests {
         assert_eq!(Command::parse(&["test", "--cloud", "--universe", "11", "--place"]), None);
         assert_eq!(Command::parse(&["test", "--cloud", "--universe", "eleven", "--place", "22"]), None);
         assert_eq!(Command::parse(&["test", "--universe", "11", "--place", "22"]), None);
+        assert_eq!(Command::parse(&["test", "--build", "build.rbxl"]), None);
+        assert_eq!(Command::parse(&["test", "--cloud", "--universe", "11", "--place", "22", "--build"]), None);
     }
 }

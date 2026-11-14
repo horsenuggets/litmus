@@ -30,10 +30,24 @@ pub fn build(project_dir: &Path) -> Result<Vec<u8>, String> {
     allow_loadstring(&built?)
 }
 
+/// A place built some other way, likewise as a file whose scripts may use `loadstring`
+pub fn read(file: &Path) -> Result<Vec<u8>, String> {
+    let binary = file
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("rbxl"));
+
+    if !binary {
+        return Err(format!("{} isn't a binary place file, which ends in .rbxl", file.display()));
+    }
+
+    let place = fs::read(file).map_err(|error| format!("couldn't read {}: {error}", file.display()))?;
+
+    allow_loadstring(&place)
+}
+
 /// The lib loads every module with `loadstring`, which a server refuses unless its place switches it on
 fn allow_loadstring(place: &[u8]) -> Result<Vec<u8>, String> {
-    let mut dom =
-        rbx_binary::from_reader(place).map_err(|error| format!("couldn't read the place rojo built: {error}"))?;
+    let mut dom = rbx_binary::from_reader(place).map_err(|error| format!("couldn't read the place file: {error}"))?;
 
     let service = dom.root().children().iter().copied().find(|child| {
         dom.get_by_ref(*child)
@@ -105,6 +119,26 @@ mod tests {
         assert_eq!(switch(scripts), Some(&Variant::Bool(true)));
         assert_eq!(source(child(&dom, storage, "Thing.spec")), Some(Variant::String("return 1\n".to_owned())));
         assert_eq!(source(child(&dom, scripts, "Server")), Some(Variant::String("return 2\n".to_owned())));
+    }
+
+    #[test]
+    fn reads_a_place_built_elsewhere() {
+        let file = env::temp_dir().join(format!("litmus-{}-reads.rbxl", process::id()));
+        fs::write(&file, place(vec![InstanceBuilder::new("ReplicatedStorage")])).unwrap();
+
+        let allowed = read(&file);
+        fs::remove_file(&file).unwrap();
+
+        let dom = rbx_binary::from_reader(allowed.unwrap().as_slice()).unwrap();
+
+        assert_eq!(switch(child(&dom, dom.root(), SCRIPT_SERVICE)), Some(&Variant::Bool(true)));
+    }
+
+    #[test]
+    fn refuses_a_file_that_is_not_a_binary_place() {
+        let problem = read(Path::new("build.rbxlx")).unwrap_err();
+
+        assert!(problem.contains("build.rbxlx isn't a binary place file"), "{problem}");
     }
 
     #[test]
