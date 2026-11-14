@@ -28,7 +28,8 @@ Commands:
   plugin uninstall    Remove the Studio plugin
 
 Options for test:
-  --cloud             Run in Roblox's cloud instead of Studio, under the API key in LITMUS_API_KEY
+  --cloud             Run in Roblox's cloud instead of Studio, under the API key in LITMUS_API_KEY,
+                      which is read from the environment, or else from the project's .env
   --universe <id>     The experience to run in, with --cloud
   --place <id>        Its place to build the project into, as a new unpublished version, with --cloud
   --build <file>      A .rbxl to use as that version, when Rojo alone doesn't build the whole place, with --cloud
