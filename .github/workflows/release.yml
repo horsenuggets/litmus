@@ -21,6 +21,11 @@ jobs:
             runner: macos-latest
             targets: aarch64-apple-darwin x86_64-apple-darwin
 
+          # Studio doesn't run here, but the workflows that test in the cloud do
+          - system: linux
+            runner: ubuntu-latest
+            targets: x86_64-unknown-linux-gnu
+
     name: Build (${{ matrix.system }})
     runs-on: ${{ matrix.runner }}
 
