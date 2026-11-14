@@ -1,0 +1,36 @@
+name: Test
+
+# Not on pushes: main only takes pull requests, so whatever lands on it has already run here
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  cloud:
+    name: Specs in the cloud
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Ferry is private, so Rokit would need a token of its own to install it, and nothing here runs it
+      - name: Leave Ferry out of the tools
+        run: |
+          grep -v '^ferry = ' rokit.toml > rokit.trimmed
+          mv rokit.trimmed rokit.toml
+
+      # Rojo builds both the plugin the CLI carries and the place the specs run in
+      - name: Install the tools
+        uses: CompeyDev/setup-rokit@v0.2.1
+
+      - name: Build the CLI
+        working-directory: cli
+        run: cargo build --locked
+
+      # Each run saves a new version of this place, which is kept for testing and never published
+      - name: Run the specs
+        env:
+          LITMUS_API_KEY: ${{ secrets.LITMUS_API_KEY }}
+        run: cli/target/debug/litmus test --cloud --universe 10756976039 --place 109535589334533
