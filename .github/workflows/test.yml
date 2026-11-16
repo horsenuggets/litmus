@@ -15,12 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Ferry is private, so Rokit would need a token of its own to install it, and nothing here runs it
-      - name: Leave Ferry out of the tools
-        run: |
-          grep -v '^ferry = ' rokit.toml > rokit.trimmed
-          mv rokit.trimmed rokit.toml
-
       # Rojo builds both the plugin the CLI carries and the place the specs run in
       - name: Install the tools
         uses: CompeyDev/setup-rokit@v0.2.1

@@ -45,12 +45,6 @@ jobs:
             exit 1
           fi
 
-      # Ferry is private, so Rokit would need a token of its own to install it, and nothing here runs it
-      - name: Leave Ferry out of the tools
-        run: |
-          grep -v '^ferry = ' rokit.toml > rokit.trimmed
-          mv rokit.trimmed rokit.toml
-
       # The CLI's build script runs Rojo to build the plugin it carries
       - name: Install the tools
         uses: CompeyDev/setup-rokit@v0.2.1
