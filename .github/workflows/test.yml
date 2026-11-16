@@ -27,4 +27,4 @@ jobs:
       - name: Run the specs
         env:
           LITMUS_API_KEY: ${{ secrets.LITMUS_API_KEY }}
-        run: cli/target/debug/litmus test --cloud --universe 10756976039 --place 109535589334533
+        run: cli/target/debug/litmus test --cloud

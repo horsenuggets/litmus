@@ -3,6 +3,7 @@ mod place;
 
 use crate::manifest::Manifest;
 use client::{Client, Progress};
+use serde::Deserialize;
 use serde_json::Value;
 use std::env;
 use std::fs;
@@ -21,7 +22,8 @@ const POLL: Duration = Duration::from_secs(1);
 const PATIENCE: Duration = Duration::from_secs(360);
 
 /// Where a cloud run happens: each run saves a new version of the place, so it should be one kept for testing
-#[derive(Debug, PartialEq)]
+#[derive(Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Place {
     pub universe: u64,
     pub place: u64,
