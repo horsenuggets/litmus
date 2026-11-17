@@ -1,6 +1,7 @@
 use crate::component::Component;
 use crate::manifest::InstancePath;
 use serde::Deserialize;
+use std::collections::BTreeSet;
 
 #[derive(Deserialize)]
 pub struct Failure {
@@ -42,6 +43,17 @@ pub struct Run {
 impl Run {
     pub fn passed(&self) -> bool {
         self.failure.is_none() && Tally::of(&self.specs).passed()
+    }
+
+    pub fn failing_sources(&self) -> BTreeSet<&InstancePath> {
+        self.specs
+            .iter()
+            .flat_map(|spec| {
+                let tests = spec.failed_tests().map(|(_, failure)| failure);
+                spec.failure.iter().chain(tests)
+            })
+            .map(|failure| &failure.source)
+            .collect()
     }
 }
 
@@ -133,6 +145,29 @@ mod tests {
         assert!(run(r#", "appendix": "text""#).passed());
         assert!(run(r#", "appendix": [{ "kind": "heading", "text": "Lines run" }]"#).passed());
         assert!(!run(r#", "failure": "too little ran""#).passed());
+    }
+
+    #[test]
+    fn names_each_file_a_failure_points_at_once() {
+        let failure = |source: &str| format!(r#"{{ "message": "m", "source": ["tests", "{source}"], "line": 1 }}"#);
+        let run: Run = serde_json::from_str(&format!(
+            r#"{{ "specs": [
+                {{ "path": ["tests", "a.spec.luau"], "tests": [
+                    {{ "name": "one", "groups": [] }},
+                    {{ "name": "two", "groups": [], "failure": {} }},
+                    {{ "name": "three", "groups": [], "failure": {} }}
+                ] }},
+                {{ "path": ["tests", "b.spec.luau"], "tests": [], "failure": {} }}
+            ] }}"#,
+            failure("a.spec.luau"),
+            failure("helper.luau"),
+            failure("b.spec.luau"),
+        ))
+        .unwrap();
+
+        let named: Vec<String> = run.failing_sources().into_iter().map(|path| path.join("/")).collect();
+
+        assert_eq!(named, ["tests/a.spec.luau", "tests/b.spec.luau", "tests/helper.luau"]);
     }
 
     #[test]
