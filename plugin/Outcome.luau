@@ -22,7 +22,9 @@ export type SpecResult = {
 }
 
 -- What came of a run: its results, or why there are none
-export type Run = { kind: "results", results: { SpecResult }, appendix: string? } | { kind: "problem", message: string }
+export type Run =
+    { kind: "results", results: { SpecResult }, appendix: string?, failure: string? }
+    | { kind: "problem", message: string }
 
 export type Status = "PASS" | "FAIL" | "ERROR"
 

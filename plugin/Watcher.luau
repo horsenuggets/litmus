@@ -50,7 +50,7 @@ local function answer(offer: bridge.Offer): (boolean, outcome.Run?)
     if ran.kind == "problem" then
         bridge.reportError(offer, ran.message)
         warn(`[Litmus]: couldn't run {offer.project}: {ran.message}`)
-    elseif bridge.reportResults(offer, { specs = ran.results, appendix = ran.appendix }) then
+    elseif bridge.reportResults(offer, { specs = ran.results, appendix = ran.appendix, failure = ran.failure }) then
         print(`[Litmus]: ran {#ran.results} specs for {offer.project}`)
     else
         warn(`[Litmus]: ran {offer.project}, but couldn't send the results back`)

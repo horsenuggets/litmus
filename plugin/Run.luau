@@ -19,6 +19,7 @@ local CODE_SERVICES: { string } = {
 type LibRun = {
     specs: { outcome.SpecResult },
     appendix: string?,
+    failure: string?,
 }
 
 local NO_SPECS: string = "This place has no .spec modules to run."
@@ -78,7 +79,7 @@ function run.specs(roots: { Instance }): outcome.Run
 
     local ran: LibRun = result
 
-    return { kind = "results", results = ran.specs, appendix = ran.appendix }
+    return { kind = "results", results = ran.specs, appendix = ran.appendix, failure = ran.failure }
 end
 
 -- Runs every spec the place has, for a run nobody handed a list to
