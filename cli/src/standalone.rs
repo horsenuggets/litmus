@@ -2,7 +2,7 @@ mod harness;
 mod process;
 mod specs;
 
-use crate::selection::Selection;
+use crate::selection::{Selection, relative};
 use serde::Deserialize;
 use serde_json::Value;
 use std::fs;
@@ -84,19 +84,6 @@ fn is_flag(flag: &str) -> bool {
     spelled && !flag.is_empty() && !flag.starts_with('-') && !OWN_OPTIONS.contains(&flag)
 }
 
-pub fn relative(path: &str) -> Result<String, String> {
-    if path.starts_with(['/', '\\']) || path.contains(':') {
-        return Err(format!("\"{path}\" has to be a path from the project's folder"));
-    }
-
-    let names: Vec<&str> = path
-        .split(['/', '\\'])
-        .filter(|name| !name.is_empty() && *name != ".")
-        .collect();
-
-    Ok(names.join("/"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,17 +109,6 @@ mod tests {
         }
 
         dir
-    }
-
-    #[test]
-    fn a_path_is_written_from_the_project_with_forward_slashes() {
-        assert_eq!(relative("tests"), Ok("tests".to_owned()));
-        assert_eq!(relative("./a\\b//c/"), Ok("a/b/c".to_owned()));
-        assert_eq!(relative("../lib"), Ok("../lib".to_owned()));
-        assert_eq!(relative("."), Ok(String::new()));
-
-        assert!(relative("/usr/lib").is_err());
-        assert!(relative("C:\\lib").is_err());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use super::relative;
+use crate::selection::relative;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;

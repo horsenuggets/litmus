@@ -1,5 +1,6 @@
-use super::{MARKER, PROGRESS_MARKER, Runtime, relative};
+use super::{MARKER, PROGRESS_MARKER, Runtime};
 use crate::luau;
+use crate::selection::relative;
 
 const HARNESS: &str = include_str!("harness.luau");
 
