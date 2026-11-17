@@ -20,8 +20,8 @@ local function inTests(...: string): outcome.Path
 end
 
 -- The scripts the failures point at, which this place really has, so their lines of code show
-local EXPECT: outcome.Path = inTests("Anchor", "Interface", "Expect")
-local FAILURES: outcome.Path = inTests("Anchor", "Interface", "Failures")
+local EXPECT: outcome.Path = inTests("Anchor", "Lib", "Expect")
+local FAILURES: outcome.Path = inTests("Anchor", "Lib", "Failures")
 local THROWER: outcome.Path = inTests("Utils", "Thrower")
 
 -- One of each thing the results window has to show, in the shape the lib returns

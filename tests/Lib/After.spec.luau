@@ -4,7 +4,7 @@ local litmus = require("../../Litmus")
 local expect = litmus.expect
 local test = litmus.test
 
-local ran: litmus.SpecResult = anchor.run("Interface", "After")
+local ran: litmus.SpecResult = anchor.run("Lib", "After")
 
 local function adapterFor(load: () -> ()): litmus.Adapter
     return {
@@ -44,8 +44,8 @@ end)
 test("reports an after that fails as a failed test", function(): ()
     local failure: litmus.Failure = anchor.failureOf(ran, "fails like a test")
 
-    expect.equal(failure.message, "Interface.After.spec:11: boom")
-    expect.same(failure.source, { "Interface", "After.spec" })
+    expect.equal(failure.message, "Lib.After.spec:11: boom")
+    expect.same(failure.source, { "Lib", "After.spec" })
     expect.equal(failure.line, 11)
 end)
 

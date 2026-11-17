@@ -4,7 +4,7 @@ local litmus = require("../../Litmus")
 local expect = litmus.expect
 local test = litmus.test
 
-local ran: litmus.SpecResult = anchor.run("Interface", "Groups")
+local ran: litmus.SpecResult = anchor.run("Lib", "Groups")
 
 local function groupsOf(name: string): { string }
     return anchor.test(ran, name).groups

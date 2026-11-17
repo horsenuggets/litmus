@@ -22,11 +22,11 @@ local function adapterWith(results: ((specs: { litmus.SpecResult }) -> litmus.Re
 end
 
 test("reports a spec by the names leading to it", function(): ()
-    expect.same(anchor.run("Interface", "Groups").path, { "Interface", "Groups.spec" })
+    expect.same(anchor.run("Lib", "Groups").path, { "Lib", "Groups.spec" })
 end)
 
 test("reports a spec that registers nothing as loaded, with no tests", function(): ()
-    local ran: litmus.SpecResult = anchor.run("Interface", "Empty")
+    local ran: litmus.SpecResult = anchor.run("Lib", "Empty")
 
     expect.equal(ran.failure, nil)
     expect.same(ran.tests, {})

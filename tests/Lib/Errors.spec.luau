@@ -4,13 +4,13 @@ local litmus = require("../../Litmus")
 local expect = litmus.expect
 local test = litmus.test
 
-local ran: litmus.SpecResult = anchor.run("Interface", "Errors")
+local ran: litmus.SpecResult = anchor.run("Lib", "Errors")
 
 test("reports a thrown error with where it was thrown", function(): ()
     local failure: litmus.Failure = anchor.failureOf(ran, "reports a thrown error")
 
-    expect.equal(failure.message, "Interface.Errors.spec:8: boom")
-    expect.same(failure.source, { "Interface", "Errors.spec" })
+    expect.equal(failure.message, "Lib.Errors.spec:8: boom")
+    expect.same(failure.source, { "Lib", "Errors.spec" })
     expect.equal(failure.line, 8)
 end)
 

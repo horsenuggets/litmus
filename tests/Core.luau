@@ -38,7 +38,7 @@ type ExpectedTest = {
 }
 
 -- Where the spec's copy sits once it is run, which is also where each of its failures must point
-local PATH: string = "Interface/Expect.spec"
+local PATH: string = "Lib/Expect.spec"
 
 -- Every spec takes `expect` at its word, so its own results are the ones checked by hand
 local EXPECTED: { ExpectedTest } = {
@@ -182,11 +182,11 @@ local function compareTests(actual: { TestResult }, expected: { ExpectedTest }):
 end
 
 -- Run as a copy kept out of the place: named as a spec there, it would fail in every other run
-local copies: Instance = tests.Anchor.Interface:Clone()
+local copies: Instance = tests.Anchor.Lib:Clone()
 
 local spec: Instance? = copies:FindFirstChild("Expect")
 if not spec then
-    error("[Core]: Tests.Anchor.Interface has no module named Expect", 0)
+    error("[Core]: Tests.Anchor.Lib has no module named Expect", 0)
 end
 
 spec.Name ..= ".spec"

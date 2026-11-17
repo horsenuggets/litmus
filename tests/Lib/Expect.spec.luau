@@ -5,7 +5,7 @@ local expect = litmus.expect
 local group = litmus.group
 local test = litmus.test
 
-local ran: litmus.SpecResult = anchor.run("Interface", "Expect")
+local ran: litmus.SpecResult = anchor.run("Lib", "Expect")
 
 local function passed(name: string): boolean
     return anchor.test(ran, name).failure == nil
