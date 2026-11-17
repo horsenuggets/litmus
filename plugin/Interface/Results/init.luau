@@ -27,7 +27,7 @@ local function results(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
 
     local specs: flux.Computed<{ outcome.SpecResult }> = scope:computed(function(use: flux.Use): { outcome.SpecResult }
-        return outcome.resultsOf(use(props.ran))
+        return outcome.specsOf(use(props.ran))
     end)
 
     local picked: flux.Value<outcome.Status?> = scope:value(nil :: outcome.Status?)
@@ -117,12 +117,12 @@ local function results(scope: flux.Scope, props: Props): Frame
 
         -- Worked out over every spec, so narrowing the list doesn't change how a row's path reads
         local specPaths: { outcome.Path } = {}
-        for index, spec in ran.results do
+        for index, spec in ran.specs do
             specPaths[index] = spec.path
         end
 
         local root: outcome.Path = paths.sharedParent(specPaths)
-        local wrong: { outcome.SpecResult }, passed: { outcome.SpecResult } = outcome.arranged(ran.results, only)
+        local wrong: { outcome.SpecResult }, passed: { outcome.SpecResult } = outcome.arranged(ran.specs, only)
 
         if #wrong == 0 then
             return rowsOf(building, passed, root)
@@ -194,7 +194,7 @@ local function results(scope: flux.Scope, props: Props): Frame
 
                 if ran.kind == "results" and ran.appendix then
                     table.insert(rows, appendix(inner, {
-                        layoutOrder = #ran.results + 2,
+                        layoutOrder = #ran.specs + 2,
 
                         appendix = ran.appendix,
                         opened = opened,

@@ -57,7 +57,7 @@ export type Appendix = { Piece }
 
 -- What came of a run: its results, or why there are none
 export type Run =
-    { kind: "results", results: { SpecResult }, appendix: Appendix?, failure: string? }
+    { kind: "results", specs: { SpecResult }, appendix: Appendix?, failure: string? }
     | { kind: "problem", message: string }
 
 export type LibRun = {
@@ -80,12 +80,12 @@ export type Tally = {
 local outcome = {}
 
 function outcome.ofLib(ran: LibRun): Run
-    return { kind = "results", results = ran.specs, appendix = ran.appendix, failure = ran.failure }
+    return { kind = "results", specs = ran.specs, appendix = ran.appendix, failure = ran.failure }
 end
 
 -- A run that couldn't happen has no specs to show, which is what everything counting them should see
-function outcome.resultsOf(ran: Run): { SpecResult }
-    return if ran.kind == "results" then ran.results else {}
+function outcome.specsOf(ran: Run): { SpecResult }
+    return if ran.kind == "results" then ran.specs else {}
 end
 
 function outcome.failedCount(tests: { TestResult }): number

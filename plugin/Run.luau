@@ -83,7 +83,7 @@ function run.all(): outcome.Run
     end
 
     local ran: outcome.Run = run.specs(roots)
-    if ran.kind == "results" and #ran.results == 0 then
+    if ran.kind == "results" and #ran.specs == 0 then
         return { kind = "problem", message = NO_SPECS }
     end
 

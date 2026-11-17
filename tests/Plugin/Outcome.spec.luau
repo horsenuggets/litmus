@@ -118,21 +118,21 @@ group("ofLib", function(): ()
 
         expect.same(outcome.ofLib({ specs = { PASSED }, appendix = appendix, failure = "too little ran" }), {
             kind = "results",
-            results = { PASSED },
+            specs = { PASSED },
             appendix = appendix,
             failure = "too little ran",
         })
 
-        expect.same(outcome.ofLib({ specs = {} }), { kind = "results", results = {} })
+        expect.same(outcome.ofLib({ specs = {} }), { kind = "results", specs = {} })
     end)
 end)
 
-group("resultsOf", function(): ()
-    test("gives a run's results", function(): ()
-        expect.same(outcome.resultsOf({ kind = "results", results = { PASSED, FAILED } }), { PASSED, FAILED })
+group("specsOf", function(): ()
+    test("gives a run's specs", function(): ()
+        expect.same(outcome.specsOf({ kind = "results", specs = { PASSED, FAILED } }), { PASSED, FAILED })
     end)
 
-    test("gives no results for a run that couldn't happen", function(): ()
-        expect.same(outcome.resultsOf({ kind = "problem", message = "no specs" }), {})
+    test("gives no specs for a run that couldn't happen", function(): ()
+        expect.same(outcome.specsOf({ kind = "problem", message = "no specs" }), {})
     end)
 end)

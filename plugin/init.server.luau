@@ -31,7 +31,7 @@ type CliRun = {
 -- Kept under its first name, from when the toolbar button was what switched this
 local CONNECTED_SETTING: string = "Enabled"
 
-local NOTHING_RAN: outcome.Run = { kind = "results", results = {} }
+local NOTHING_RAN: outcome.Run = { kind = "results", specs = {} }
 
 -- A play test starts its own copy of every plugin, and the test place holds a copy of this script as well; only
 -- the copy editing the place should do anything, so nothing a plugin alone may use comes before this

@@ -197,7 +197,7 @@ local SAMPLE_APPENDIX: outcome.Appendix = {
     },
 }
 
-local SAMPLE_RUN: outcome.Run = { kind = "results", results = SAMPLE_RESULTS, appendix = SAMPLE_APPENDIX }
+local SAMPLE_RUN: outcome.Run = { kind = "results", specs = SAMPLE_RESULTS, appendix = SAMPLE_APPENDIX }
 
 -- Shows the control window without and with results from the CLI, sharing one checkbox state, beside the results window
 local function story(target: Frame): () -> ()
