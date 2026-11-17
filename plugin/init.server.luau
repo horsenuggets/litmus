@@ -12,18 +12,19 @@ local studioColors = require("@self/Interface/StudioColors")
 local theme = require("@self/Interface/Theme")
 local watcher = require("@self/Watcher")
 
--- Which button a run was started from, which the results window's title says
-type Source = "Test" | "CLI"
+-- Where a run was started from, which the results window's title says
+type Source = "Test" | "CLI" | "Standalone"
 
 -- What the results window is showing
 type Shown = {
     source: Source,
     ran: outcome.Run,
+    sourceAt: sources.Reader,
 }
 
--- The latest run carried out for a CLI, and whether it has been opened since
+-- The latest run carried out for a CLI or collected from one, and whether it has been opened since
 type CliRun = {
-    ran: outcome.Run,
+    arrived: watcher.Arrival,
     seen: boolean,
 }
 
@@ -71,7 +72,6 @@ local scope: flux.Scope = flux.scope()
 
 local studioTheme: flux.Value<StudioTheme> = scope:value(studio.Theme)
 theme.provide(scope, studioColors(scope, studioTheme))
-sources.provide(scope, place.sourceAt)
 
 studio.ThemeChanged:Connect(function(): ()
     studioTheme:set(studio.Theme)
@@ -84,23 +84,35 @@ local connected: flux.Value<boolean> = scope:value(plugin:GetSetting(CONNECTED_S
 local shown: flux.Value<Shown?> = scope:value(nil :: Shown?)
 local cliRun: flux.Value<CliRun?> = scope:value(nil :: CliRun?)
 
-local function show(source: Source, ran: outcome.Run): ()
-    shown:set({ source = source, ran = ran })
+sources.provide(scope, function(path: outcome.Path): string?
+    local showing: Shown? = flux.peek(shown)
+    return if showing then showing.sourceAt(path) else nil
+end)
 
-    resultsWindow.Title = `Litmus: {source}`
+local function show(showing: Shown): ()
+    shown:set(showing)
+
+    resultsWindow.Title = `Litmus: {showing.source}`
     resultsWindow.Enabled = true
 end
 
+local function showArrival(arrived: watcher.Arrival): ()
+    show({
+        source = if arrived.standalone then "Standalone" else "CLI",
+        ran = arrived.ran,
+        sourceAt = arrived.sourceAt,
+    })
+end
+
 local function cliRan(arrived: watcher.Arrival): ()
-    local ran: outcome.Run = arrived.ran
     local showing: Shown? = flux.peek(shown)
 
     -- A window already open on the CLI's results takes the new ones at once, which leaves nothing unseen
-    local seen: boolean = resultsWindow.Enabled and showing ~= nil and showing.source == "CLI"
-    cliRun:set({ ran = ran, seen = seen })
+    local seen: boolean = resultsWindow.Enabled and showing ~= nil and showing.source ~= "Test"
+    cliRun:set({ arrived = arrived, seen = seen })
 
     if seen then
-        show("CLI", ran)
+        showArrival(arrived)
     end
 end
 
@@ -111,7 +123,7 @@ control(scope, {
     end,
 
     testActivated = function(): ()
-        show("Test", run.all())
+        show({ source = "Test", ran = run.all(), sourceAt = place.sourceAt })
     end,
 
     cliResults = scope:computed(function(use: flux.Use): control.CliResults
@@ -129,8 +141,8 @@ control(scope, {
             return
         end
 
-        cliRun:set({ ran = latest.ran, seen = true })
-        show("CLI", latest.ran)
+        cliRun:set({ arrived = latest.arrived, seen = true })
+        showArrival(latest.arrived)
     end,
 }).Parent = controlWindow
 
