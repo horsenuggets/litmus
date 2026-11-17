@@ -91,7 +91,8 @@ local function show(source: Source, ran: outcome.Run): ()
     resultsWindow.Enabled = true
 end
 
-local function cliRan(ran: outcome.Run): ()
+local function cliRan(arrived: watcher.Arrival): ()
+    local ran: outcome.Run = arrived.ran
     local showing: Shown? = flux.peek(shown)
 
     -- A window already open on the CLI's results takes the new ones at once, which leaves nothing unseen

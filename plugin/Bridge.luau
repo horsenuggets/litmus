@@ -20,7 +20,26 @@ export type RunOffer = {
     port: number,
 }
 
-export type Offer = RunOffer
+export type ShowOffer = {
+    protocol: number,
+    kind: "show",
+    project: string,
+    runId: string,
+
+    port: number,
+}
+
+export type Offer = RunOffer | ShowOffer
+
+export type Source = {
+    path: Path,
+    text: string,
+}
+
+export type Shown = {
+    results: any,
+    sources: { Source },
+}
 
 -- The CLI takes the first of these that is free, so the two lists have to stay the same
 local PORTS: { number } = { 37100, 37101 }
@@ -84,6 +103,20 @@ end
 -- False when another place took the run first
 function bridge.claim(offer: Offer): boolean
     return post(offer, "/claim", { place = game.Name })
+end
+
+function bridge.collect(offer: ShowOffer): Shown?
+    local ok: boolean, body: string = send(offer.port, "POST", "/collect", { runId = offer.runId, place = game.Name })
+    if not ok then
+        return nil
+    end
+
+    local decoded: boolean, shown: any = pcall(httpService.JSONDecode, httpService, body)
+    if not decoded or type(shown) ~= "table" or type(shown.results) ~= "table" or type(shown.sources) ~= "table" then
+        return nil
+    end
+
+    return shown
 end
 
 function bridge.reportMismatch(offer: Offer, missing: { Path }, differing: { Path }): ()

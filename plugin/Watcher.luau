@@ -3,8 +3,14 @@ local outcome = require("./Outcome")
 local place = require("./Place")
 local run = require("./Run")
 
--- Told what came of each run this place carries out for a CLI
-export type Listener = (ran: outcome.Run) -> ()
+export type Arrival = {
+    ran: outcome.Run,
+    standalone: boolean,
+    sourceAt: (path: outcome.Path) -> string?,
+}
+
+-- Told what came of each run this place carries out for a CLI, or collects from one
+export type Listener = (arrived: Arrival) -> ()
 
 local POLL_SECONDS: number = 1
 
@@ -21,11 +27,39 @@ local settled: { [number]: string } = {}
 
 local listener: Listener? = nil
 
--- Returns whether this place is done with the offer, and what came of the run if it carried one out
-local function answer(offer: bridge.Offer): (boolean, outcome.Run?)
+local function collected(offer: bridge.ShowOffer): Arrival?
+    local shown: bridge.Shown? = bridge.collect(offer)
+    if not shown then
+        warn(`[Litmus]: couldn't collect the standalone run of {offer.project}`)
+        return nil
+    end
+
+    local texts: { [string]: string } = {}
+    for _, source in shown.sources do
+        texts[table.concat(source.path, "/")] = source.text
+    end
+
+    print(`[Litmus]: collected the standalone run of {offer.project}`)
+
+    return {
+        ran = outcome.ofLib(shown.results),
+        standalone = true,
+
+        sourceAt = function(path: outcome.Path): string?
+            return texts[table.concat(path, "/")]
+        end,
+    }
+end
+
+-- Returns whether this place is done with the offer, and what came of the run if it carried one out or collected one
+local function answer(offer: bridge.Offer): (boolean, Arrival?)
     if offer.protocol ~= bridge.PROTOCOL then
         warn(`[Litmus]: {offer.project} speaks protocol {offer.protocol} and this plugin speaks {bridge.PROTOCOL}; update the older one`)
         return true, nil
+    end
+
+    if offer.kind == "show" then
+        return true, collected(offer)
     end
 
     local specs: { Instance } = place.findAll(offer.specs)
@@ -56,7 +90,7 @@ local function answer(offer: bridge.Offer): (boolean, outcome.Run?)
         warn(`[Litmus]: ran {offer.project}, but couldn't send the results back`)
     end
 
-    return true, ran
+    return true, { ran = ran, standalone = false, sourceAt = place.sourceAt }
 end
 
 -- One loop per port: Windows takes two seconds to refuse an idle port, and a shared round made every run wait for all of them
@@ -69,7 +103,7 @@ local function watch(port: number): ()
         local offer: bridge.Offer? = bridge.offer(port)
         if offer and not answering and settled[port] ~= offer.runId then
             answering = true
-            local answered: boolean, done: unknown, ran: outcome.Run? = pcall(answer, offer)
+            local answered: boolean, done: unknown, arrived: Arrival? = pcall(answer, offer)
             answering = false
 
             if not answered then
@@ -83,8 +117,8 @@ local function watch(port: number): ()
 
             -- Told on a thread of its own, so a fault in the listener reads as the listener's and polling goes on
             local told: Listener? = listener
-            if answered and ran and told then
-                task.spawn(told, ran)
+            if answered and arrived and told then
+                task.spawn(told, arrived)
             end
         end
 
