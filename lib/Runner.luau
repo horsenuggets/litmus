@@ -1,6 +1,6 @@
 local collector = require("./Collector")
 local failure = require("./Failure")
-local pieces = require("./Report")
+local report = require("./Report")
 
 export type Failure = {
     message: string,
@@ -38,13 +38,13 @@ export type Adapter = {
 }
 
 export type Remarks = {
-    appendix: { pieces.Piece }?,
+    appendix: { report.Piece }?,
     failure: string?,
 }
 
 export type Run = {
     specs: { SpecResult },
-    appendix: { pieces.Piece }?,
+    appendix: { report.Piece }?,
     failure: string?,
 }
 
@@ -58,7 +58,7 @@ export type Progress =
 type Tell = (event: Progress) -> ()
 
 -- A failure knows its script only by the name the chunk ran under, which the adapter turns back into the script
-local function report(adapter: Adapter, caught: failure.Failure?): Failure?
+local function placed(adapter: Adapter, caught: failure.Failure?): Failure?
     if not caught then
         return nil
     end
@@ -78,7 +78,7 @@ local function catch(adapter: Adapter, body: () -> ()): Failure?
         return adapter.locate(chunk) ~= nil
     end)
 
-    return report(adapter, caught)
+    return placed(adapter, caught)
 end
 
 type Running = {
