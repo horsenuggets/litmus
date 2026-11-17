@@ -9,11 +9,13 @@ const SCRIPT_SERVICE: &str = "ServerScriptService";
 const LOADSTRING_SWITCH: &str = "LoadStringEnabled";
 
 /// The project as a place file whose scripts may use `loadstring`
-pub fn build(project_dir: &Path) -> Result<Vec<u8>, String> {
+pub fn build(project_dir: &Path, rojo_project: Option<&Path>) -> Result<Vec<u8>, String> {
     let file = env::temp_dir().join(format!("litmus-{}.rbxl", process::id()));
 
     let output = Command::new("rojo")
-        .args(["build", "--output"])
+        .arg("build")
+        .args(rojo_project)
+        .arg("--output")
         .arg(&file)
         .current_dir(project_dir)
         .output()

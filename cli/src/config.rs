@@ -3,7 +3,7 @@ use crate::standalone::Runtime;
 use serde::Deserialize;
 use std::fs;
 use std::io::ErrorKind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const FILE: &str = "litmus.toml";
 
@@ -12,6 +12,13 @@ const FILE: &str = "litmus.toml";
 pub struct Config {
     cloud: Option<Place>,
     standalone: Option<Runtime>,
+    rojo: Option<Rojo>,
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct Rojo {
+    project: PathBuf,
 }
 
 impl Config {
@@ -32,7 +39,20 @@ impl Config {
                 .map_err(|problem| format!("{FILE} has a [standalone] table that doesn't add up: {problem}"))?;
         }
 
+        if let Some(rojo) = &config.rojo
+            && rojo.project.components().count() != 1
+        {
+            return Err(format!(
+                "{FILE} gives \"{}\" as the Rojo project, which has to be a file in the project's own folder",
+                rojo.project.display()
+            ));
+        }
+
         Ok(config)
+    }
+
+    pub fn rojo_project(&self) -> Option<PathBuf> {
+        self.rojo.as_ref().map(|rojo| rojo.project.clone())
     }
 
     pub fn cloud(self) -> Result<Place, String> {
@@ -104,6 +124,23 @@ mod tests {
         assert!(Config::parse("[cloud]\nuniverse = 11\nplace = 22\nplaec = 33\n").is_err());
         assert!(Config::parse("[clowd]\nuniverse = 11\nplace = 22\n").is_err());
         assert!(Config::parse(&format!("{STANDALONE}adaptor = \"adapter.luau\"\n")).is_err());
+    }
+
+    #[test]
+    fn reads_the_rojo_project_a_place_is_built_from() {
+        let config = Config::parse("[rojo]\nproject = \"place.project.json\"\n").unwrap();
+
+        assert_eq!(config.rojo_project(), Some(PathBuf::from("place.project.json")));
+        assert_eq!(Config::default().rojo_project(), None);
+    }
+
+    #[test]
+    fn refuses_a_rojo_project_it_could_not_place_files_from() {
+        assert!(Config::parse("[rojo]\n").is_err());
+        assert!(Config::parse("[rojo]\nproject = \"place.project.json\"\nbuild = true\n").is_err());
+
+        let problem = Config::parse("[rojo]\nproject = \"projects/place.project.json\"\n").unwrap_err();
+        assert!(problem.contains("projects/place.project.json"), "{problem}");
     }
 
     #[test]

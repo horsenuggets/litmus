@@ -44,6 +44,8 @@ Options for test:
   --<flag>            A flag of the project's own for its adapter, with --standalone
 
 litmus.toml:
+  [rojo]              The Rojo project a plugin or cloud run reads the place from, as `project`, when it isn't
+                      the default one
   [cloud]             The experience and its place, as `universe` and `place`; and as `build`, a .rbxl to use as
                       the new version, when Rojo alone doesn't build the whole place
   [standalone]        The command that runs a Luau file, as `run`; the folder of litmus's lib, as `lib`; where to
@@ -222,7 +224,10 @@ fn run_standalone(project_dir: &Path, flags: &[String], selection: &Selection) -
 }
 
 fn run_in_place(project_dir: &Path, backend: &Backend, selection: &Selection) -> Result<Ran, String> {
-    let mut manifest = Manifest::read(project_dir)?;
+    let config = Config::read(project_dir)?;
+    let rojo_project = config.rojo_project();
+
+    let mut manifest = Manifest::read(project_dir, rojo_project.as_deref())?;
     if manifest.specs().is_empty() {
         return Err("the project has no .spec files".to_owned());
     }
@@ -231,8 +236,8 @@ fn run_in_place(project_dir: &Path, backend: &Backend, selection: &Selection) ->
 
     let results = match backend {
         Backend::Cloud => {
-            let place = Config::read(project_dir)?.cloud()?;
-            cloud::run(project_dir, &manifest, &place)?
+            let place = config.cloud()?;
+            cloud::run(project_dir, &manifest, &place, rojo_project.as_deref())?
         }
         _ => run_with_plugin(&manifest)?,
     };

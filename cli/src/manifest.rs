@@ -39,9 +39,10 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    pub fn read(project_dir: &Path) -> Result<Manifest, String> {
+    pub fn read(project_dir: &Path, rojo_project: Option<&Path>) -> Result<Manifest, String> {
         let output = Command::new("rojo")
             .arg("sourcemap")
+            .args(rojo_project)
             .current_dir(project_dir)
             .output()
             .map_err(|error| format!("couldn't run rojo: {error}"))?;
