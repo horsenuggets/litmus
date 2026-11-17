@@ -1,7 +1,7 @@
 local bridge = require("./Bridge")
+local harness = require("./Harness")
 local outcome = require("./Outcome")
 local place = require("./Place")
-local run = require("./Run")
 
 export type Arrival = {
     ran: outcome.Run,
@@ -79,7 +79,7 @@ local function answer(offer: bridge.Offer): (boolean, Arrival?)
         return true, nil
     end
 
-    local ran: outcome.Run = run.specs(specs)
+    local ran: outcome.Run = harness.specs(specs)
 
     if ran.kind == "problem" then
         bridge.reportError(offer, ran.message)

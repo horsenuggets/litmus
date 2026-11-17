@@ -54,11 +54,11 @@ local function runThroughLib(roots: { Instance }): outcome.LibRun
     return chunk().run(lib, roots)
 end
 
-local run = {}
+local harness = {}
 
 -- Runs every spec under `roots`, a spec being a root itself or anything beneath one
 -- Never throws: a run that couldn't happen comes back as the problem that stopped it
-function run.specs(roots: { Instance }): outcome.Run
+function harness.specs(roots: { Instance }): outcome.Run
     if running then
         return { kind = "problem", message = BUSY }
     end
@@ -75,14 +75,14 @@ function run.specs(roots: { Instance }): outcome.Run
 end
 
 -- Runs every spec the place has, for a run nobody handed a list to
-function run.all(): outcome.Run
+function harness.all(): outcome.Run
     local roots: { Instance } = {}
 
     for _, name in CODE_SERVICES do
         table.insert(roots, game:GetService(name))
     end
 
-    local ran: outcome.Run = run.specs(roots)
+    local ran: outcome.Run = harness.specs(roots)
     if ran.kind == "results" and #ran.specs == 0 then
         return { kind = "problem", message = NO_SPECS }
     end
@@ -90,4 +90,4 @@ function run.all(): outcome.Run
     return ran
 end
 
-return run
+return harness

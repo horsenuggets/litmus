@@ -2,11 +2,11 @@ local runService = game:GetService("RunService")
 
 local control = require("@self/Interface/Control")
 local flux = require("@self/Packages/Flux")
+local harness = require("@self/Harness")
 local imageIds = require("@self/ImageIds")
 local outcome = require("@self/Outcome")
 local place = require("@self/Place")
 local results = require("@self/Interface/Results")
-local run = require("@self/Run")
 local sources = require("@self/Interface/Sources")
 local studioColors = require("@self/Interface/StudioColors")
 local theme = require("@self/Interface/Theme")
@@ -123,7 +123,7 @@ control(scope, {
     end,
 
     testActivated = function(): ()
-        show({ origin = "Test", ran = run.all(), sourceAt = place.sourceAt })
+        show({ origin = "Test", ran = harness.all(), sourceAt = place.sourceAt })
     end,
 
     cliResults = scope:computed(function(use: flux.Use): control.CliResults
