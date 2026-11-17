@@ -9,6 +9,7 @@ mod report;
 mod results;
 mod selection;
 mod server;
+mod show;
 mod standalone;
 
 use config::Config;
@@ -16,10 +17,11 @@ use manifest::Manifest;
 use report::Sources;
 use results::Run;
 use selection::Selection;
+use serde::Deserialize;
 use serde_json::Value;
 use server::{Outcome, Server, Timeouts};
 use std::env;
-use std::io;
+use std::io::{self, IsTerminal};
 use std::path::Path;
 use std::process::ExitCode;
 use terminal_size::{Width, terminal_size_of};
@@ -41,7 +43,8 @@ Options for test:
   --plugin            Run in an open Studio place, through the plugin, as without any of these three
   --cloud             Run in Roblox's cloud, in the place litmus.toml names, which the project is built into as a
                       new unpublished version
-  --standalone        Run in a runtime on this machine, started by the command litmus.toml gives
+  --standalone        Run in a runtime on this machine, started by the command litmus.toml gives; from a terminal,
+                      the results then stay on offer for three seconds, for any open Studio place to show
   --<flag>            A flag of the project's own for its adapter, with --standalone
 
 litmus.toml:
@@ -204,13 +207,17 @@ fn test(asked: &Test) -> Result<bool, String> {
         Backend::Plugin | Backend::Cloud => run_in_place(project_dir, &asked.backend, &selection)?,
     };
 
-    let run: Run = serde_json::from_value(ran.results)
+    let run = Run::deserialize(&ran.results)
         .map_err(|error| format!("couldn't read the results, so the project's lib may not match this CLI: {error}"))?;
 
     // Asked of stdout alone, so output sent to a file or another program is never wrapped
     let columns = terminal_size_of(io::stdout()).map(|(Width(columns), _)| usize::from(columns));
 
     anstream::print!("{}", report::render(&run, &ran.sources, columns));
+
+    if asked.backend == Backend::Standalone && io::stdout().is_terminal() {
+        show::offer(project_dir, &ran.results, &run);
+    }
 
     Ok(run.passed())
 }
