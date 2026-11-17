@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   standalone:
-    name: CLI tests and specs on the runner
+    name: CLI tests and standalone specs
     runs-on: ubuntu-latest
 
     steps:
