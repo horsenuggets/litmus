@@ -58,7 +58,7 @@ export type Progress =
 type Tell = (event: Progress) -> ()
 
 -- A failure knows its script only by the name the chunk ran under, which the adapter turns back into the script
-local function placed(adapter: Adapter, caught: failure.Failure?): Failure?
+local function placed(adapter: Adapter, caught: failure.Caught?): Failure?
     if not caught then
         return nil
     end
@@ -67,14 +67,14 @@ local function placed(adapter: Adapter, caught: failure.Failure?): Failure?
         message = caught.message,
 
         -- A chunk the adapter can't place has nothing but that name to go by
-        source = adapter.locate(caught.source) or { caught.source },
+        source = adapter.locate(caught.chunk) or { caught.chunk },
         line = caught.line,
         trace = caught.trace,
     }
 end
 
 local function catch(adapter: Adapter, body: () -> ()): Failure?
-    local caught: failure.Failure? = failure.catch(body, function(chunk: string): boolean
+    local caught: failure.Caught? = failure.catch(body, function(chunk: string): boolean
         return adapter.locate(chunk) ~= nil
     end)
 

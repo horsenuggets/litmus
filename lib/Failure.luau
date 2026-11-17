@@ -1,6 +1,6 @@
-export type Failure = {
+export type Caught = {
     message: string,
-    source: string,
+    chunk: string,
     line: number,
     trace: string,
 }
@@ -41,7 +41,7 @@ local function findCaller(level: number, isProject: (chunk: string) -> boolean):
     return nil, nil
 end
 
-local function describe(thrown: unknown, isProject: (chunk: string) -> boolean): Failure
+local function describe(thrown: unknown, isProject: (chunk: string) -> boolean): Caught
     if raised[thrown] then
         return thrown :: any
     end
@@ -65,7 +65,7 @@ local function describe(thrown: unknown, isProject: (chunk: string) -> boolean):
 
     return {
         message = message,
-        source = callerSource or source,
+        chunk = callerSource or source,
         line = callerLine or line,
         trace = debug.traceback(nil, level),
     }
@@ -77,9 +77,9 @@ local failure = {}
 function failure.raise(message: string, level: number): never
     local source: string, line: number = debug.info(level + 1, "sl")
 
-    local value: Failure = {
+    local value: Caught = {
         message = message,
-        source = source,
+        chunk = source,
         line = line,
         trace = debug.traceback(nil, level + 1),
     }
@@ -89,11 +89,11 @@ function failure.raise(message: string, level: number): never
 end
 
 -- Runs `body` and returns how it failed, or nil if it didn't
-function failure.catch(body: () -> (), isProject: (chunk: string) -> boolean): Failure?
-    local _: boolean, problem: Failure? = xpcall(function(): Failure?
+function failure.catch(body: () -> (), isProject: (chunk: string) -> boolean): Caught?
+    local _: boolean, problem: Caught? = xpcall(function(): Caught?
         body()
         return nil
-    end, function(thrown: unknown): Failure
+    end, function(thrown: unknown): Caught
         return describe(thrown, isProject)
     end)
 
