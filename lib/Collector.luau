@@ -42,7 +42,8 @@ function collector.after(name: string, run: () -> ()): ()
         error("[Litmus]: after called inside a group; it covers the whole spec", 2)
     end
 
-    table.insert(collecting.afters, { name = name, groups = table.clone(groups), run = run })
+    local step: Test = { name = name, groups = {}, run = run }
+    table.insert(collecting.afters, step)
 end
 
 function collector.begin(): ()
