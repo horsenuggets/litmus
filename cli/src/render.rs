@@ -92,7 +92,7 @@ pub fn run(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
     }
 
     lines.extend(summary(&Tally::of(results)));
-    lines.extend(run.failure.as_deref().map(failed).unwrap_or_default());
+    lines.extend(run.failure.as_deref().map(run_failure).unwrap_or_default());
     lines.push(String::new());
 
     lines.join("\n")
@@ -156,7 +156,7 @@ fn summary(tally: &Tally) -> [String; 2] {
     ]
 }
 
-fn failed(reason: &str) -> Vec<String> {
+fn run_failure(reason: &str) -> Vec<String> {
     let mut reason = reason.trim_end().lines();
     let first = reason.next().unwrap_or_default();
 

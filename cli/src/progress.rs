@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 const LOAD_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::White));
 const RUN_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::Cyan));
 
-const MAX_LISTED: usize = 5;
-const PAUSE: Duration = Duration::from_millis(100);
+const MAX_SPECS_LISTED: usize = 5;
+const REDRAW_INTERVAL: Duration = Duration::from_millis(100);
 
 const WRAP_OFF: &str = "\x1b[?7l";
 const WRAP_ON: &str = "\x1b[?7h";
@@ -93,7 +93,7 @@ impl Progress {
 
         let mut rows: Vec<(Style, &str, String, String)> = Vec::new();
 
-        for (spec, running) in self.running.iter().take(MAX_LISTED) {
+        for (spec, running) in self.running.iter().take(MAX_SPECS_LISTED) {
             let note = format!("{} of {} tests", running.finished, running.tests);
             rows.push((RUN_BADGE, "RUN", self.name(*spec), note));
         }
@@ -109,7 +109,7 @@ impl Progress {
             .map(|(style, label, name, note)| render::headline(*style, label, name, width, note))
             .collect();
 
-        let unlisted = self.running.len().saturating_sub(MAX_LISTED);
+        let unlisted = self.running.len().saturating_sub(MAX_SPECS_LISTED);
         if unlisted > 0 {
             lines.push(format!("          and {unlisted} more running"));
         }
@@ -175,7 +175,7 @@ impl Display {
     }
 
     pub fn refresh(&mut self) {
-        if self.drawn.elapsed() >= PAUSE {
+        if self.drawn.elapsed() >= REDRAW_INTERVAL {
             self.draw();
         }
     }

@@ -7,7 +7,7 @@ use crate::server::{Mismatch, Outcome, Server, Timeouts};
 use serde_json::Value;
 
 /// How many of a stale place's files get named before the rest are only counted
-const MAX_LISTED: usize = 10;
+const MAX_FILES_LISTED: usize = 10;
 
 /// The results as the lib wrote them, from whichever open place holds the project
 pub fn run(manifest: &Manifest) -> Result<Value, String> {
@@ -43,11 +43,11 @@ fn unclaimed(mismatches: &[Mismatch]) -> String {
         ));
 
         let paths = mismatch.differing.iter().chain(&mismatch.missing);
-        for path in paths.clone().take(MAX_LISTED) {
+        for path in paths.clone().take(MAX_FILES_LISTED) {
             lines.push(format!("    {}", path.join(".")));
         }
 
-        let unlisted = paths.count().saturating_sub(MAX_LISTED);
+        let unlisted = paths.count().saturating_sub(MAX_FILES_LISTED);
         if unlisted > 0 {
             lines.push(format!("    and {unlisted} more"));
         }
