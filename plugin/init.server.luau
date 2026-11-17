@@ -28,8 +28,7 @@ type CliRun = {
     seen: boolean,
 }
 
--- Kept under its first name, from when the toolbar button was what switched this
-local CONNECTED_SETTING: string = "Enabled"
+local CONNECTED_SETTING: string = "Connected"
 
 local NOTHING_RAN: outcome.Run = { kind = "results", specs = {} }
 
