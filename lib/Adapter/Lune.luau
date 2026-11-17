@@ -154,7 +154,7 @@ end
 
 local function lune(options: Options): runner.Adapter
     local session: loader.Class = loader.new({
-        name = function(module: string): string
+        chunkName = function(module: string): string
             return module
         end,
 
@@ -179,7 +179,7 @@ local function lune(options: Options): runner.Adapter
         specs = specs,
 
         locate = function(chunk: string): { string }?
-            local module: string? = session:named(chunk)
+            local module: string? = session:moduleOf(chunk)
             return if module then string.split(module, "/") else nil
         end,
 

@@ -47,7 +47,7 @@ end
 local roblox = {}
 
 -- What a module's chunk runs under, and so what errors and tracebacks call it
-function roblox.name(module: ModuleScript): string
+function roblox.chunkName(module: ModuleScript): string
     return module:GetFullName()
 end
 
@@ -81,7 +81,7 @@ end
 
 function roblox.load(module: ModuleScript, globals: { [string]: any }): (...any) -> ...any
     -- The "=" makes errors and tracebacks print the name bare, as they do for a real script
-    local chunk: ((...any) -> ...any)?, problem: string? = loadstring(module.Source, `={roblox.name(module)}`)
+    local chunk: ((...any) -> ...any)?, problem: string? = loadstring(module.Source, `={roblox.chunkName(module)}`)
     if not chunk then
         error(problem, 0)
     end
@@ -127,7 +127,7 @@ function roblox.adapter(session: any, specs: { ModuleScript }): any
         specs = listed,
 
         locate = function(chunk: string): { string }?
-            local module: ModuleScript? = session:named(chunk)
+            local module: ModuleScript? = session:moduleOf(chunk)
             return if module then roblox.path(module) else nil
         end,
 

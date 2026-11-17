@@ -156,7 +156,7 @@ local function adapter(options: lune.Options): litmus.Adapter
     end
 
     adapted.locate = function(chunk: string): { string }?
-        local module: any = session:named(chunk)
+        local module: any = session:moduleOf(chunk)
         local file: string? = if module then place.files[module] else nil
 
         return if file then string.split(file, "/") else nil

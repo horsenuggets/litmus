@@ -6,7 +6,7 @@ export type Module = any
 -- What the loader needs from the platform it runs on; an adapter that loads through it is the implementation
 export type Host = {
     -- What `load` runs the module's chunk under
-    name: (module: Module) -> string,
+    chunkName: (module: Module) -> string,
     resolve: (from: Module, target: unknown) -> Module,
     load: (module: Module, globals: { [string]: any }) -> (...any) -> ...any,
 }
@@ -25,7 +25,7 @@ loader.__index = loader
 type Members = {
     _host: Host,
     _loaded: { [Module]: Loaded },
-    _named: { [string]: Module },
+    _byChunk: { [string]: Module },
 }
 
 export type Class = setmetatable<Members, typeof(loader)>
@@ -34,17 +34,17 @@ function loader.new(host: Host): Class
     local self: Class = (setmetatable({}, loader) :: any)
     self._host = host
     self._loaded = {}
-    self._named = {}
+    self._byChunk = {}
     return self
 end
 
 -- The chain of requires leading back to `module`, if it's still loading further up
 function loader._findCycle(self: Class, requirer: Link?, module: Module): string?
-    local names: { string } = { self._host.name(module) }
+    local names: { string } = { self._host.chunkName(module) }
     local link: Link? = requirer
 
     while link do
-        table.insert(names, 1, self._host.name(link.module))
+        table.insert(names, 1, self._host.chunkName(link.module))
 
         if link.module == module then
             return table.concat(names, " -> ")
@@ -60,7 +60,7 @@ function loader._run(self: Class, module: Module, requirer: Link?): { n: number,
     local link: Link = { module = module, requirer = requirer }
 
     -- Noted before loading, so a module that doesn't compile can still be found by the name its error gives
-    self._named[self._host.name(module)] = module
+    self._byChunk[self._host.chunkName(module)] = module
 
     local chunk: (...any) -> ...any = self._host.load(module, {
         require = function(target: unknown): any
@@ -84,7 +84,7 @@ function loader._load(self: Class, module: Module, requirer: Link?): any
 
     local results: { n: number, [number]: any } = self:_run(module, requirer)
     if results.n ~= 1 then
-        error(`[Litmus]: {self._host.name(module)} returned {results.n} values; a module must return exactly one`, 0)
+        error(`[Litmus]: {self._host.chunkName(module)} returned {results.n} values; a module must return exactly one`, 0)
     end
 
     self._loaded[module] = { value = results[1] }
@@ -95,9 +95,9 @@ function loader.require(self: Class, module: Module): any
     return self:_load(module, nil)
 end
 
--- The module whose chunk runs under `name`, if this session has run it
-function loader.named(self: Class, name: string): Module?
-    return self._named[name]
+-- The module whose chunk runs under `chunk`, if this session has run it
+function loader.moduleOf(self: Class, chunk: string): Module?
+    return self._byChunk[chunk]
 end
 
 -- For a spec: runs it for what it registers, caching nothing and ignoring what it returns
