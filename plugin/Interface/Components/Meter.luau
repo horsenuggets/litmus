@@ -58,6 +58,8 @@ local function meter(scope: flux.Scope, props: Props): Frame
         scope:element "UICorner" { CornerRadius = UDim.new(1, 0) },
 
         scope:element "UIGradient" {
+            Rotation = 0,
+
             Color = scope:computed(function(use: flux.Use): ColorSequence
                 local points: { ColorSequenceKeypoint } = {}
 
