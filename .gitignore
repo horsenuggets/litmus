@@ -1,6 +1,7 @@
 # Build files
 /build.rbxl
 /cli/target
+.litmus
 
 # Roblox Studio lock files
 *.rbxlx.lock

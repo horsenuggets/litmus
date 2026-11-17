@@ -32,3 +32,8 @@ group("outer", function(): ()
         end)
     end)
 end)
+
+test("points at the test that ran a chunk nobody can place", function(): ()
+    local unplaced: any = loadstring("error('from nowhere')", "=Nowhere")
+    unplaced()
+end)

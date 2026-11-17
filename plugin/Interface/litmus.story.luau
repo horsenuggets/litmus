@@ -128,6 +128,8 @@ local SAMPLE_RESULTS: { outcome.SpecResult } = {
     },
 }
 
+local SAMPLE_RUN: outcome.Run = { kind = "results", results = SAMPLE_RESULTS }
+
 -- Shows the control window without and with results from the CLI, sharing one checkbox state, beside the results window
 local function story(target: Frame): () -> ()
     local scope: flux.Scope = flux.scope()
@@ -224,7 +226,7 @@ local function story(target: Frame): () -> ()
             Size = RESULTS_SIZE,
 
             results(scope, {
-                ran = { kind = "results", results = SAMPLE_RESULTS },
+                ran = SAMPLE_RUN,
             }),
         },
     }

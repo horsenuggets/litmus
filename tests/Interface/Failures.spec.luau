@@ -45,6 +45,14 @@ test("points an error the lib raised at the test that caused it", function(): ()
     expect.equal(failure.line, 25)
 end)
 
+test("points at the test when what threw can't be placed", function(): ()
+    local failure: litmus.Failure = anchor.failureOf(ran, "points at the test that ran a chunk nobody can place")
+
+    expect.equal(failure.message, "Nowhere:1: from nowhere")
+    expect.same(failure.source, { "Interface", "Failures.spec" })
+    expect.equal(failure.line, 38)
+end)
+
 test("fails a test inside groups like any other", function(): ()
     local failure: litmus.Failure = anchor.failureOf(ran, "names every group it sits in")
 

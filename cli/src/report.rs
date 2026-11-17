@@ -1,9 +1,9 @@
 use crate::manifest::Manifest;
-use crate::results::{Failure, SpecResult, Tally};
+use crate::results::{Failure, Run, SpecResult, Tally};
 use crate::server::Mismatch;
 use anstyle::{AnsiColor, Color, RgbColor, Style};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::PathBuf;
 
 /// The sixteen named colours have no orange, so this one is given as an exact colour: #FFB042
 const ORANGE_COLOR: Color = Color::Rgb(RgbColor(255, 176, 66));
@@ -31,20 +31,46 @@ const LIB_TAG: &str = "[Litmus]: ";
 /// How many of a stale place's files get named before the rest are only counted
 const MAX_LISTED: usize = 10;
 
-/// Files by the path the lib reports them under
-type Files<'a> = HashMap<&'a [String], &'a Path>;
+pub enum Sources {
+    Place(HashMap<Vec<String>, PathBuf>),
+    Disk,
+}
+
+impl Sources {
+    pub fn of(manifest: &Manifest) -> Sources {
+        Sources::Place(
+            manifest
+                .scripts
+                .iter()
+                .map(|script| (script.path.clone(), script.file.clone()))
+                .collect(),
+        )
+    }
+
+    fn file(&self, path: &[String]) -> String {
+        match self {
+            Sources::Place(files) => files
+                .get(path)
+                .map_or_else(|| path.join("."), |file| file.display().to_string()),
+            Sources::Disk => path.join("/"),
+        }
+    }
+
+    fn chunk(&self, path: &[String]) -> String {
+        match self {
+            Sources::Place(_) => path.join("."),
+            Sources::Disk => path.join("/"),
+        }
+    }
+}
 
 /// `columns` is how wide the terminal is, or nothing when the text isn't going to one
-pub fn render(results: &[SpecResult], manifest: &Manifest, columns: Option<usize>) -> String {
-    let files: Files = manifest
-        .scripts
-        .iter()
-        .map(|script| (script.path.as_slice(), script.file.as_path()))
-        .collect();
+pub fn render(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
+    let results = &run.specs;
 
     let name_width = results
         .iter()
-        .map(|spec| name_of(&spec.path, &files).chars().count())
+        .map(|spec| sources.file(&spec.path).chars().count())
         .max()
         .unwrap_or(0);
 
@@ -52,7 +78,7 @@ pub fn render(results: &[SpecResult], manifest: &Manifest, columns: Option<usize
     let mut after_details = false;
 
     for (index, spec) in results.iter().enumerate() {
-        let block = spec_lines(spec, &files, name_width, columns);
+        let block = spec_lines(spec, sources, name_width, columns);
         let has_details = block.len() > 1;
 
         // Passing specs sit together as a list, while a spec with details stands apart on both sides
@@ -68,6 +94,11 @@ pub fn render(results: &[SpecResult], manifest: &Manifest, columns: Option<usize
         lines.push(String::new());
     }
 
+    if let Some(appendix) = &run.appendix {
+        lines.extend(appendix.trim_end().lines().map(str::to_owned));
+        lines.push(String::new());
+    }
+
     lines.extend(summary(&Tally::of(results)));
     lines.push(String::new());
 
@@ -75,12 +106,12 @@ pub fn render(results: &[SpecResult], manifest: &Manifest, columns: Option<usize
 }
 
 /// A passing spec takes one line; any other is followed by what went wrong
-fn spec_lines(spec: &SpecResult, files: &Files, name_width: usize, columns: Option<usize>) -> Vec<String> {
-    let name = name_of(&spec.path, files);
+fn spec_lines(spec: &SpecResult, sources: &Sources, name_width: usize, columns: Option<usize>) -> Vec<String> {
+    let name = sources.file(&spec.path);
 
     if let Some(failure) = &spec.failure {
         let mut lines = vec![headline(ERROR_BADGE, "ERROR", &name, name_width, "")];
-        lines.extend(describe(failure, files, columns));
+        lines.extend(describe(failure, sources, columns));
 
         return lines;
     }
@@ -98,7 +129,7 @@ fn spec_lines(spec: &SpecResult, files: &Files, name_width: usize, columns: Opti
         let title: Vec<&str> = test.groups.iter().chain([&test.name]).map(String::as_str).collect();
 
         lines.push(format!("   {} {}", paint(RED, "✗"), title.join(" > ")));
-        lines.extend(describe(failure, files, columns));
+        lines.extend(describe(failure, sources, columns));
     }
 
     lines
@@ -162,23 +193,16 @@ pub fn unclaimed(mismatches: &[Mismatch]) -> String {
     lines.join("\n")
 }
 
-/// The file a path from the lib stands for, or the path as Studio writes it when it isn't one of the project's
-fn name_of(path: &[String], files: &Files) -> String {
-    files
-        .get(path)
-        .map_or_else(|| path.join("."), |file| file.display().to_string())
-}
-
 /// `path:line: message`, the form a terminal turns into a link, with the message's further lines kept under its first
-fn describe(failure: &Failure, files: &Files, columns: Option<usize>) -> Vec<String> {
-    let location = format!("{}:{}:", name_of(&failure.source, files), failure.line);
+fn describe(failure: &Failure, sources: &Sources, columns: Option<usize>) -> Vec<String> {
+    let location = format!("{}:{}:", sources.file(&failure.source), failure.line);
     let margin = " ".repeat(DETAIL_INDENT.len() + location.chars().count() + 1);
 
     let room = columns
         .map(|columns| columns.saturating_sub(margin.len()))
         .filter(|room| *room >= MIN_MESSAGE_WIDTH);
 
-    let mut message = wrap(tidy(failure), room).into_iter();
+    let mut message = wrap(tidy(failure, sources), room).into_iter();
     let first = message.next().unwrap_or_default();
 
     let mut lines = vec![format!("{DETAIL_INDENT}{} {first}", paint(DIM, &location))];
@@ -223,9 +247,8 @@ fn wrap(text: &str, width: Option<usize>) -> Vec<String> {
 }
 
 /// Luau starts a thrown message with where it was thrown, which the location beside it already says
-fn tidy(failure: &Failure) -> &str {
-    // The position names the script the way Studio does, with dots between the names
-    let position = format!("{}:{}: ", failure.source.join("."), failure.line);
+fn tidy<'a>(failure: &'a Failure, sources: &Sources) -> &'a str {
+    let position = format!("{}:{}: ", sources.chunk(&failure.source), failure.line);
     let message = failure.message.strip_prefix(&position).unwrap_or(&failure.message);
 
     message.strip_prefix(LIB_TAG).unwrap_or(message)
@@ -289,8 +312,18 @@ mod tests {
     }
 
     fn plain_at(results: &str, columns: Option<usize>) -> String {
-        let results: Vec<SpecResult> = serde_json::from_str(results).unwrap();
-        anstream::adapter::strip_str(&render(&results, &manifest(), columns)).to_string()
+        plain_run(&run(results, None), columns)
+    }
+
+    fn run(results: &str, appendix: Option<&str>) -> Run {
+        Run {
+            specs: serde_json::from_str(results).unwrap(),
+            appendix: appendix.map(str::to_owned),
+        }
+    }
+
+    fn plain_run(run: &Run, columns: Option<usize>) -> String {
+        anstream::adapter::strip_str(&render(run, &Sources::of(&manifest()), columns)).to_string()
     }
 
     #[test]
@@ -369,9 +402,8 @@ mod tests {
             ],
         };
 
-        let results: Vec<SpecResult> =
-            serde_json::from_str(r#"[{ "path": ["Shared", "Util", "spec"], "tests": [] }]"#).unwrap();
-        let text = anstream::adapter::strip_str(&render(&results, &manifest, None)).to_string();
+        let run = run(r#"[{ "path": ["Shared", "Util", "spec"], "tests": [] }]"#, None);
+        let text = anstream::adapter::strip_str(&render(&run, &Sources::of(&manifest), None)).to_string();
 
         assert!(text.contains("src/Util/spec.luau"), "{text}");
     }
@@ -403,6 +435,50 @@ mod tests {
 ";
 
         assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn shows_what_the_adapter_added_between_the_specs_and_the_counts() {
+        let results = r#"[{ "path": ["ReplicatedStorage", "Good.spec"], "tests": [{ "name": "works", "groups": [] }] }]"#;
+        let text = plain_run(&run(results, Some("Coverage\n  src/Helper.luau  87%\n")), None);
+
+        let expected = "
+  PASS    tests/Good.spec.luau  1 test
+
+Coverage
+  src/Helper.luau  87%
+
+ Specs  1 passed
+ Tests  1 passed
+";
+
+        assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn shows_what_the_adapter_added_when_no_spec_ran() {
+        let text = plain_run(&run("[]", Some("nothing to cover")), None);
+
+        assert_eq!(text, "\nnothing to cover\n\n Specs  none\n Tests  none\n");
+    }
+
+    #[test]
+    fn shows_a_run_on_disk_by_the_files_its_adapter_named() {
+        let run = run(
+            r#"[{ "path": ["tests", "Bad.spec.luau"], "tests": [{ "name": "throws", "groups": [], "failure": {
+                "message": "src/Helper.luau:4: boom", "source": ["src", "Helper.luau"], "line": 4, "trace": "t"
+            } }] }]"#,
+            None,
+        );
+        let text = anstream::adapter::strip_str(&render(&run, &Sources::Disk, None)).to_string();
+
+        let expected = "
+  FAIL    tests/Bad.spec.luau  0 of 1 passed
+   ✗ throws
+     src/Helper.luau:4: boom
+";
+
+        assert!(text.starts_with(expected), "{text}");
     }
 
     #[test]

@@ -1,24 +1,29 @@
 mod cloud;
+mod config;
+mod luau;
 mod manifest;
 mod plugin;
 mod report;
 mod results;
 mod server;
+mod standalone;
 
+use config::Config;
 use manifest::Manifest;
-use results::{SpecResult, Tally};
+use report::Sources;
+use results::{Run, Tally};
 use serde_json::Value;
 use server::{Outcome, Server, Timeouts};
 use std::env;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use terminal_size::{Width, terminal_size_of};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const HELP: &str = "\
-Runs a project's tests in Roblox Studio
+Runs a project's tests, in Roblox Studio or wherever litmus.toml says
 
 Usage: litmus <command>
 
@@ -28,11 +33,21 @@ Commands:
   plugin uninstall    Remove the Studio plugin
 
 Options for test:
-  --cloud             Run in Roblox's cloud instead of Studio, under the API key in LITMUS_API_KEY,
-                      which is read from the environment, or else from the project's .env
-  --universe <id>     The experience to run in, with --cloud
-  --place <id>        Its place to build the project into, as a new unpublished version, with --cloud
-  --build <file>      A .rbxl to use as that version, when Rojo alone doesn't build the whole place, with --cloud
+  --plugin            Run in an open Studio place, through the plugin, as without any of these three
+  --cloud             Run in Roblox's cloud, in the place litmus.toml names, which the project is built into as a
+                      new unpublished version
+  --standalone        Run in a runtime on this machine, started by the command litmus.toml gives
+  --<flag>            A flag of the project's own for its adapter, with --standalone
+
+litmus.toml:
+  [cloud]             The experience and its place, as `universe` and `place`; and as `build`, a .rbxl to use as
+                      the new version, when Rojo alone doesn't build the whole place
+  [standalone]        The command that runs a Luau file, as `run`; the folder of litmus's lib, as `lib`; where to
+                      look for .spec files, as `specs`; and for a project with an adapter of its own, that file
+                      as `adapter` and the flags it takes as `flags`
+
+A cloud run also needs:
+  LITMUS_API_KEY      The Open Cloud API key to run under, read from the environment, or else from the project's .env
 
 Options:
   -h, --help          Print this help
@@ -40,49 +55,61 @@ Options:
 ";
 
 #[derive(Debug, PartialEq)]
-enum Target {
-    Studio,
-    Cloud {
-        place: cloud::Place,
-
-        /// The place file to upload, when it isn't to be built from the project
-        build: Option<PathBuf>,
-    },
+enum Backend {
+    Plugin,
+    Cloud,
+    Standalone,
 }
 
-impl Target {
-    /// None when the options don't add up to one place to run in
-    fn parse(options: &[&str]) -> Option<Target> {
-        let mut in_cloud = false;
-        let mut universe = None;
-        let mut place = None;
-        let mut build = None;
-
-        let mut options = options.iter();
-        while let Some(option) = options.next() {
-            match *option {
-                "--cloud" => in_cloud = true,
-                "--universe" => universe = Some(options.next()?.parse().ok()?),
-                "--place" => place = Some(options.next()?.parse().ok()?),
-                "--build" => build = Some(PathBuf::from(options.next()?)),
-                _ => return None,
-            }
-        }
-
-        match (in_cloud, universe, place, build) {
-            (false, None, None, None) => Some(Target::Studio),
-            (true, Some(universe), Some(place), build) => Some(Target::Cloud {
-                place: cloud::Place { universe, place },
-                build,
-            }),
+impl Backend {
+    fn named(name: &str) -> Option<Backend> {
+        match name {
+            "plugin" => Some(Backend::Plugin),
+            "cloud" => Some(Backend::Cloud),
+            "standalone" => Some(Backend::Standalone),
             _ => None,
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
+struct Test {
+    backend: Backend,
+    flags: Vec<String>,
+}
+
+impl Test {
+    /// None when the options don't add up to one place to run in
+    fn parse(options: &[&str]) -> Option<Test> {
+        let mut backend = None;
+        let mut flags = Vec::new();
+
+        for option in options {
+            let name = option.strip_prefix("--")?;
+
+            match Backend::named(name) {
+                Some(named) if backend.is_none() => backend = Some(named),
+                Some(_) => return None,
+                None if name.is_empty() => return None,
+                None => flags.push(name.to_owned()),
+            }
+        }
+
+        Some(Test {
+            backend: backend.unwrap_or(Backend::Plugin),
+            flags,
+        })
+    }
+}
+
+struct Ran {
+    results: Value,
+    sources: Sources,
+}
+
+#[derive(Debug, PartialEq)]
 enum Command {
-    Test(Target),
+    Test(Test),
     PluginInstall,
     PluginUninstall,
     Help,
@@ -95,7 +122,7 @@ impl Command {
         let words: Vec<&str> = arguments.iter().map(AsRef::as_ref).collect();
 
         match words.as_slice() {
-            ["test", options @ ..] => Target::parse(options).map(Command::Test),
+            ["test", options @ ..] => Test::parse(options).map(Command::Test),
             ["plugin", "install"] => Some(Command::PluginInstall),
             ["plugin", "uninstall"] => Some(Command::PluginUninstall),
             ["--help" | "-h"] => Some(Command::Help),
@@ -107,7 +134,7 @@ impl Command {
     /// False only when tests ran and didn't all pass
     fn run(self) -> Result<bool, String> {
         match self {
-            Command::Test(target) => test(&target),
+            Command::Test(asked) => test(&asked),
             Command::PluginInstall => plugin::install().and(Ok(true)),
             Command::PluginUninstall => plugin::uninstall().and(Ok(true)),
             Command::Help => {
@@ -142,32 +169,64 @@ fn main() -> ExitCode {
 }
 
 /// Whether every spec loaded and every test passed
-fn test(target: &Target) -> Result<bool, String> {
+fn test(asked: &Test) -> Result<bool, String> {
     let project_dir = Path::new(".");
 
+    if asked.backend != Backend::Standalone
+        && let Some(flag) = asked.flags.first()
+    {
+        return Err(format!(
+            "--{flag} isn't an option of litmus; a flag of the project's own goes with --standalone"
+        ));
+    }
+
+    let ran = match asked.backend {
+        Backend::Standalone => run_standalone(project_dir, &asked.flags)?,
+        Backend::Plugin | Backend::Cloud => run_in_place(project_dir, &asked.backend)?,
+    };
+
+    let run: Run = serde_json::from_value(ran.results)
+        .map_err(|error| format!("couldn't read the results, so the project's lib may not match this CLI: {error}"))?;
+
+    // Asked of stdout alone, so output sent to a file or another program is never wrapped
+    let columns = terminal_size_of(io::stdout()).map(|(Width(columns), _)| usize::from(columns));
+
+    anstream::print!("{}", report::render(&run, &ran.sources, columns));
+
+    Ok(Tally::of(&run.specs).passed())
+}
+
+fn run_standalone(project_dir: &Path, flags: &[String]) -> Result<Ran, String> {
+    let runtime = Config::read(project_dir)?.standalone()?;
+
+    Ok(Ran {
+        results: standalone::run(project_dir, &runtime, flags)?,
+        sources: Sources::Disk,
+    })
+}
+
+fn run_in_place(project_dir: &Path, backend: &Backend) -> Result<Ran, String> {
     let manifest = Manifest::read(project_dir)?;
     if manifest.specs().is_empty() {
         return Err("the project has no .spec files".to_owned());
     }
 
-    let results = match target {
-        Target::Studio => run_in_studio(&manifest)?,
-        Target::Cloud { place, build } => cloud::run(project_dir, &manifest, place, build.as_deref())?,
+    let results = match backend {
+        Backend::Cloud => {
+            let place = Config::read(project_dir)?.cloud()?;
+            cloud::run(project_dir, &manifest, &place)?
+        }
+        _ => run_with_plugin(&manifest)?,
     };
 
-    let results: Vec<SpecResult> = serde_json::from_value(results)
-        .map_err(|error| format!("couldn't read the results, so the place's lib may not match this CLI: {error}"))?;
-
-    // Asked of stdout alone, so output sent to a file or another program is never wrapped
-    let columns = terminal_size_of(io::stdout()).map(|(Width(columns), _)| usize::from(columns));
-
-    anstream::print!("{}", report::render(&results, &manifest, columns));
-
-    Ok(Tally::of(&results).passed())
+    Ok(Ran {
+        results,
+        sources: Sources::of(&manifest),
+    })
 }
 
 /// The results as the lib wrote them, from whichever open place holds the project
-fn run_in_studio(manifest: &Manifest) -> Result<Value, String> {
+fn run_with_plugin(manifest: &Manifest) -> Result<Value, String> {
     let server = Server::open()?;
     eprintln!("litmus: waiting for Studio on port {}", server.port());
 
@@ -187,9 +246,16 @@ fn run_in_studio(manifest: &Manifest) -> Result<Value, String> {
 mod tests {
     use super::*;
 
+    fn test_on(backend: Backend, flags: &[&str]) -> Option<Command> {
+        Some(Command::Test(Test {
+            backend,
+            flags: flags.iter().map(|flag| (*flag).to_owned()).collect(),
+        }))
+    }
+
     #[test]
     fn reads_each_command() {
-        assert_eq!(Command::parse(&["test"]), Some(Command::Test(Target::Studio)));
+        assert_eq!(Command::parse(&["test"]), test_on(Backend::Plugin, &[]));
         assert_eq!(Command::parse(&["plugin", "install"]), Some(Command::PluginInstall));
         assert_eq!(Command::parse(&["plugin", "uninstall"]), Some(Command::PluginUninstall));
         assert_eq!(Command::parse(&["--help"]), Some(Command::Help));
@@ -207,33 +273,39 @@ mod tests {
     }
 
     #[test]
-    fn reads_where_a_cloud_run_happens() {
-        let cloud = |build: Option<&str>| {
-            Some(Command::Test(Target::Cloud {
-                place: cloud::Place {
-                    universe: 11,
-                    place: 22,
-                },
-                build: build.map(PathBuf::from),
-            }))
-        };
-
-        assert_eq!(Command::parse(&["test", "--cloud", "--universe", "11", "--place", "22"]), cloud(None));
-        assert_eq!(Command::parse(&["test", "--place", "22", "--universe", "11", "--cloud"]), cloud(None));
-        assert_eq!(
-            Command::parse(&["test", "--cloud", "--universe", "11", "--place", "22", "--build", "build.rbxl"]),
-            cloud(Some("build.rbxl"))
-        );
+    fn reads_the_backend_a_test_run_names() {
+        assert_eq!(Command::parse(&["test", "--plugin"]), test_on(Backend::Plugin, &[]));
+        assert_eq!(Command::parse(&["test", "--cloud"]), test_on(Backend::Cloud, &[]));
+        assert_eq!(Command::parse(&["test", "--standalone"]), test_on(Backend::Standalone, &[]));
     }
 
     #[test]
-    fn refuses_a_cloud_run_it_could_not_place() {
-        assert_eq!(Command::parse(&["test", "--cloud"]), None);
-        assert_eq!(Command::parse(&["test", "--cloud", "--universe", "11"]), None);
-        assert_eq!(Command::parse(&["test", "--cloud", "--universe", "11", "--place"]), None);
-        assert_eq!(Command::parse(&["test", "--cloud", "--universe", "eleven", "--place", "22"]), None);
-        assert_eq!(Command::parse(&["test", "--universe", "11", "--place", "22"]), None);
-        assert_eq!(Command::parse(&["test", "--build", "build.rbxl"]), None);
-        assert_eq!(Command::parse(&["test", "--cloud", "--universe", "11", "--place", "22", "--build"]), None);
+    fn keeps_any_other_flag_for_the_project() {
+        assert_eq!(
+            Command::parse(&["test", "--coverage", "--standalone", "--full-trace"]),
+            test_on(Backend::Standalone, &["coverage", "full-trace"])
+        );
+        assert_eq!(Command::parse(&["test", "--backend"]), test_on(Backend::Plugin, &["backend"]));
+    }
+
+    #[test]
+    fn refuses_options_that_do_not_add_up() {
+        assert_eq!(Command::parse(&["test", "--cloud", "--standalone"]), None);
+        assert_eq!(Command::parse(&["test", "--plugin", "--plugin"]), None);
+        assert_eq!(Command::parse(&["test", "--standalone", "coverage"]), None);
+        assert_eq!(Command::parse(&["test", "-c"]), None);
+        assert_eq!(Command::parse(&["test", "--"]), None);
+    }
+
+    #[test]
+    fn a_flag_of_the_project_only_goes_with_a_standalone_run() {
+        let asked = Test {
+            backend: Backend::Cloud,
+            flags: vec!["coverage".to_owned()],
+        };
+
+        let problem = test(&asked).unwrap_err();
+
+        assert!(problem.contains("--coverage") && problem.contains("--standalone"), "{problem}");
     }
 }

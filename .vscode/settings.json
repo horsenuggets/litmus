@@ -1,4 +1,4 @@
 {
     "luau-lsp.fflags.enableNewSolver": true,
-    "luau-lsp.ignoreGlobs": ["tests/Anchor/Loader/**"]
+    "luau-lsp.ignoreGlobs": ["tests/Anchor/Loader/**", "examples/standalone/tests/Broken.spec.luau"]
 }

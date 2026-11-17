@@ -16,6 +16,11 @@ local CODE_SERVICES: { string } = {
     "StarterPlayer",
 }
 
+type LibRun = {
+    specs: { outcome.SpecResult },
+    appendix: string?,
+}
+
 local NO_SPECS: string = "This place has no .spec modules to run."
 local BUSY: string = "Another run is still going."
 
@@ -31,10 +36,19 @@ local function moduleIn(parent: Instance, name: string): ModuleScript
     return found
 end
 
+local function folderIn(parent: Instance, name: string): Instance
+    local found: Instance? = parent:FindFirstChild(name)
+    if not found then
+        error(`[Litmus]: {parent:GetFullName()} has nothing named {name}`, 0)
+    end
+
+    return found
+end
+
 -- Goes through the place's own copy of the lib, so the specs and the runner share one
-local function runThroughLib(roots: { Instance }): { outcome.SpecResult }
+local function runThroughLib(roots: { Instance }): LibRun
     local lib: ModuleScript = moduleIn(replicatedStorage, LIB_NAME)
-    local entry: ModuleScript = moduleIn(lib, "External")
+    local entry: ModuleScript = moduleIn(folderIn(lib, "Adapter"), "Roblox")
 
     -- Loaded straight from its source, so Studio's require cache stays out of it
     local chunk: ((...any) -> ...any)?, problem: string? = loadstring(entry.Source, `={entry:GetFullName()}`)
@@ -62,7 +76,9 @@ function run.specs(roots: { Instance }): outcome.Run
         return { kind = "problem", message = tostring(result) }
     end
 
-    return { kind = "results", results = result }
+    local ran: LibRun = result
+
+    return { kind = "results", results = ran.specs, appendix = ran.appendix }
 end
 
 -- Runs every spec the place has, for a run nobody handed a list to

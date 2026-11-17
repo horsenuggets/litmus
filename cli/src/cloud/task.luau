@@ -39,7 +39,7 @@ for _, path in httpService:JSONDecode(specsJson) do
 end
 
 local lib: ModuleScript = moduleIn(replicatedStorage, LIB_NAME)
-local entry: ModuleScript = moduleIn(lib, "External")
+local entry: ModuleScript = moduleIn(find({ replicatedStorage.Name, LIB_NAME, "Adapter" }), "Roblox")
 
 local chunk: ((...any) -> ...any)?, problem: string? = loadstring(entry.Source, `={entry:GetFullName()}`)
 if not chunk then
