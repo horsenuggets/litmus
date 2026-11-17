@@ -1,5 +1,6 @@
 local collector = require("./Collector")
 local failure = require("./Failure")
+local report = require("./Report")
 
 export type Failure = {
     message: string,
@@ -37,13 +38,13 @@ export type Adapter = {
 }
 
 export type Remarks = {
-    appendix: string?,
+    appendix: (string | { report.Component })?,
     failure: string?,
 }
 
 export type Run = {
     specs: { SpecResult },
-    appendix: string?,
+    appendix: (string | { report.Component })?,
     failure: string?,
 }
 
