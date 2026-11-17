@@ -247,10 +247,10 @@ fn run_in_cloud(project_dir: &Path, selection: &Selection) -> Result<Ran, String
     let manifest = manifest_of(project_dir, &config, selection)?;
 
     let rojo_project = config.rojo_project();
-    let place = config.cloud()?;
+    let target = config.cloud()?;
 
     Ok(Ran {
-        results: cloud::run(project_dir, &manifest, &place, rojo_project.as_deref())?,
+        results: cloud::run(project_dir, &manifest, &target, rojo_project.as_deref())?,
         sources: Sources::of(&manifest),
     })
 }

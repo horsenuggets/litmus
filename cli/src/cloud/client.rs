@@ -1,4 +1,4 @@
-use super::Place;
+use super::Target;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -99,10 +99,10 @@ impl Client {
     }
 
     /// Saves `file` as the place's newest version, without publishing it, and returns that version's number
-    pub fn upload(&self, place: &Place, file: &[u8]) -> Result<u64, String> {
+    pub fn upload(&self, target: &Target, file: &[u8]) -> Result<u64, String> {
         let url = format!(
             "{}/universes/v1/{}/places/{}/versions?versionType=Saved",
-            self.origin, place.universe, place.place
+            self.origin, target.universe, target.place
         );
 
         let response = self
@@ -117,10 +117,10 @@ impl Client {
     }
 
     /// Starts `script` in a server of its own holding that version of the place, and returns the task to ask after
-    pub fn start(&self, place: &Place, version: u64, script: &str) -> Result<String, String> {
+    pub fn start(&self, target: &Target, version: u64, script: &str) -> Result<String, String> {
         let url = format!(
             "{}/cloud/v2/universes/{}/places/{}/versions/{version}/luau-execution-session-tasks",
-            self.origin, place.universe, place.place
+            self.origin, target.universe, target.place
         );
 
         let response = self
@@ -170,7 +170,7 @@ mod tests {
     use std::thread;
     use tiny_http::{Header, Server};
 
-    const PLACE: Place = Place {
+    const TARGET: Target = Target {
         universe: 11,
         place: 22,
         build: None,
@@ -240,7 +240,7 @@ mod tests {
     fn uploads_the_place_as_a_saved_version() {
         let (client, handle) = fake(200, r#"{ "versionNumber": 7 }"#);
 
-        assert_eq!(client.upload(&PLACE, b"<roblox!"), Ok(7));
+        assert_eq!(client.upload(&TARGET, b"<roblox!"), Ok(7));
         assert_eq!(
             handle.join().unwrap(),
             asked("POST", "/universes/v1/11/places/22/versions?versionType=Saved", b"<roblox!")
@@ -251,7 +251,7 @@ mod tests {
     fn starts_a_task_in_the_version_it_is_given() {
         let (client, handle) = fake(200, r#"{ "path": "universes/11/tasks/abc", "state": "QUEUED" }"#);
 
-        assert_eq!(client.start(&PLACE, 7, "return 1"), Ok("universes/11/tasks/abc".to_owned()));
+        assert_eq!(client.start(&TARGET, 7, "return 1"), Ok("universes/11/tasks/abc".to_owned()));
         assert_eq!(
             handle.join().unwrap(),
             asked(
@@ -291,7 +291,7 @@ mod tests {
     #[test]
     fn a_refusal_carries_what_open_cloud_said() {
         let (client, handle) = fake(429, r#"{ "message": "too many tasks" }"#);
-        let problem = client.start(&PLACE, 7, "return 1").unwrap_err();
+        let problem = client.start(&TARGET, 7, "return 1").unwrap_err();
         handle.join().unwrap();
 
         assert!(problem.starts_with("couldn't start the task: Open Cloud answered 429"), "{problem}");
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn a_key_that_is_turned_away_is_told_what_it_needs() {
         let (client, handle) = fake(403, "{}");
-        let problem = client.upload(&PLACE, b"").unwrap_err();
+        let problem = client.upload(&TARGET, b"").unwrap_err();
         handle.join().unwrap();
 
         assert!(problem.contains("403"), "{problem}");

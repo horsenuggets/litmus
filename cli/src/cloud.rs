@@ -25,26 +25,26 @@ const PATIENCE: Duration = Duration::from_secs(360);
 /// Where a cloud run happens: each run saves a new version of the place, so it should be one kept for testing
 #[derive(Deserialize, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct Place {
+pub struct Target {
     pub universe: u64,
     pub place: u64,
     pub build: Option<PathBuf>,
 }
 
 /// Runs the project's specs in a version of the place saved for this run, and returns the results as the lib wrote them
-pub fn run(project_dir: &Path, manifest: &Manifest, place: &Place, rojo_project: Option<&Path>) -> Result<Value, String> {
+pub fn run(project_dir: &Path, manifest: &Manifest, target: &Target, rojo_project: Option<&Path>) -> Result<Value, String> {
     let client = Client::new(key(project_dir)?);
 
-    let file = match &place.build {
+    let file = match &target.build {
         // Taken at its word: nothing checks that it holds the code on disk, as the hashes do for a place in Studio
         Some(build) => place::read(&project_dir.join(build))?,
         None => place::build(project_dir, rojo_project)?,
     };
 
-    let version = client.upload(place, &file)?;
-    eprintln!("litmus: running in version {version} of place {}", place.place);
+    let version = client.upload(target, &file)?;
+    eprintln!("litmus: running in version {version} of place {}", target.place);
 
-    let task = client.start(place, version, &script(manifest)?)?;
+    let task = client.start(target, version, &script(manifest)?)?;
     results(&wait(&client, &task)?)
 }
 

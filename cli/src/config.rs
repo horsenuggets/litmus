@@ -1,4 +1,4 @@
-use crate::cloud::Place;
+use crate::cloud::Target;
 use crate::standalone::Runtime;
 use serde::Deserialize;
 use std::fs;
@@ -10,7 +10,7 @@ const FILE: &str = "litmus.toml";
 #[derive(Deserialize, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    cloud: Option<Place>,
+    cloud: Option<Target>,
     standalone: Option<Runtime>,
     rojo: Option<Rojo>,
 }
@@ -55,7 +55,7 @@ impl Config {
         self.rojo.as_ref().map(|rojo| rojo.project.clone())
     }
 
-    pub fn cloud(self) -> Result<Place, String> {
+    pub fn cloud(self) -> Result<Target, String> {
         self.cloud.ok_or_else(|| {
             format!(
                 "{FILE} names no place for a cloud run; \
@@ -88,7 +88,7 @@ mod tests {
 
         assert_eq!(
             config.cloud(),
-            Ok(Place {
+            Ok(Target {
                 universe: 11,
                 place: 22,
                 build: None,
