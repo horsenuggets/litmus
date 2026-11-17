@@ -8,12 +8,7 @@ local cli = require "./Cli"
 
 local litmus = require "../../lib"
 local loader = require "../../lib/Loader"
-
-export type Options = {
-    lib: string,
-    specs: { string },
-    flags: { [string]: true },
-}
+local lune = require "../../lib/Adapter/Lune"
 
 type Node = {
     name: string,
@@ -119,7 +114,7 @@ local function hostOf(place: Place, lib: any): any
             local function chunk()
                 return litmus
             end
-            
+
             return chunk, nil
         end
 
@@ -130,7 +125,7 @@ local function hostOf(place: Place, lib: any): any
         debugName = `={LIB_CHUNKS}Adapter/Roblox`,
         environment = shared,
     })
-    
+
     return exec()
 end
 
@@ -143,7 +138,7 @@ local function scriptAt(place: Place, file: string): any
     return found
 end
 
-local function adapter(options: Options): litmus.Adapter
+local function adapter(options: lune.Options): litmus.Adapter
     local place: Place = placeFrom(serde.decode("json", cli.run("rojo", { "sourcemap" }).stdout))
 
     local host: any = hostOf(place, scriptAt(place, `{options.lib}/init.luau`))
