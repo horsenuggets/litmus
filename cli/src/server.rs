@@ -27,7 +27,7 @@ impl Default for Timeouts {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Offer<'a> {
+struct RunOffer<'a> {
     protocol: u32,
     kind: &'static str,
     project: &'a str,
@@ -80,7 +80,7 @@ struct Exchange {
     mismatches: Vec<Mismatch>,
 }
 
-enum Answer<'a> {
+enum RunAnswer<'a> {
     Offer(&'a str),
     Status(u16),
     Claimed(&'a str),
@@ -90,7 +90,7 @@ enum Answer<'a> {
 impl Exchange {
     fn new(manifest: &Manifest) -> Result<Exchange, String> {
         let run_id = new_run_id();
-        let offer = serde_json::to_string(&Offer {
+        let offer = serde_json::to_string(&RunOffer {
             protocol: PROTOCOL,
             kind: "run",
             project: &manifest.project,
@@ -108,41 +108,41 @@ impl Exchange {
         })
     }
 
-    fn answer(&mut self, method: &Method, url: &str, body: &str) -> Answer<'_> {
+    fn answer(&mut self, method: &Method, url: &str, body: &str) -> RunAnswer<'_> {
         match (method, url) {
             (Method::Get, "/offer") => match self.claimant {
-                None => Answer::Offer(&self.offer),
-                Some(_) => Answer::Status(410),
+                None => RunAnswer::Offer(&self.offer),
+                Some(_) => RunAnswer::Status(410),
             },
 
             (Method::Post, "/claim") => match read::<Claim>(&self.run_id, body) {
-                Ok(claim) if self.claimant.is_none() => Answer::Claimed(self.claimant.insert(claim.place)),
-                Ok(_) => Answer::Status(409),
-                Err(status) => Answer::Status(status),
+                Ok(claim) if self.claimant.is_none() => RunAnswer::Claimed(self.claimant.insert(claim.place)),
+                Ok(_) => RunAnswer::Status(409),
+                Err(status) => RunAnswer::Status(status),
             },
 
             (Method::Post, "/mismatch") => match read::<Mismatch>(&self.run_id, body) {
                 Ok(mismatch) => {
                     self.mismatches.retain(|earlier| earlier.place != mismatch.place);
                     self.mismatches.push(mismatch);
-                    Answer::Status(200)
+                    RunAnswer::Status(200)
                 }
-                Err(status) => Answer::Status(status),
+                Err(status) => RunAnswer::Status(status),
             },
 
             (Method::Post, "/result") => match (read::<Completion>(&self.run_id, body), self.claimant.clone()) {
-                (Ok(completion), Some(place)) => Answer::Finished(match completion.results {
+                (Ok(completion), Some(place)) => RunAnswer::Finished(match completion.results {
                     Some(results) => Outcome::Results(results),
                     None => Outcome::Failed {
                         place,
                         message: completion.error.unwrap_or_else(|| "it gave no reason".to_owned()),
                     },
                 }),
-                (Ok(_), None) => Answer::Status(409),
-                (Err(status), _) => Answer::Status(status),
+                (Ok(_), None) => RunAnswer::Status(409),
+                (Err(status), _) => RunAnswer::Status(status),
             },
 
-            _ => Answer::Status(404),
+            _ => RunAnswer::Status(404),
         }
     }
 
@@ -157,7 +157,7 @@ impl Exchange {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Announcement<'a> {
+struct ShowOffer<'a> {
     protocol: u32,
     kind: &'static str,
     project: &'a str,
@@ -175,7 +175,7 @@ struct Showing<'a> {
     run: &'a str,
 }
 
-enum Reply<'a> {
+enum ShowAnswer<'a> {
     Offer(&'a str),
     Run { place: String, run: &'a str },
     Status(u16),
@@ -184,7 +184,7 @@ enum Reply<'a> {
 impl<'a> Showing<'a> {
     fn new(project: &str, run: &'a str) -> Result<Showing<'a>, String> {
         let run_id = new_run_id();
-        let offer = serde_json::to_string(&Announcement {
+        let offer = serde_json::to_string(&ShowOffer {
             protocol: PROTOCOL,
             kind: "show",
             project,
@@ -195,19 +195,19 @@ impl<'a> Showing<'a> {
         Ok(Showing { run_id, offer, run })
     }
 
-    fn answer(&self, method: &Method, url: &str, body: &str) -> Reply<'_> {
+    fn answer(&self, method: &Method, url: &str, body: &str) -> ShowAnswer<'_> {
         match (method, url) {
-            (Method::Get, "/offer") => Reply::Offer(&self.offer),
+            (Method::Get, "/offer") => ShowAnswer::Offer(&self.offer),
 
             (Method::Post, "/collect") => match read::<Collect>(&self.run_id, body) {
-                Ok(collect) => Reply::Run {
+                Ok(collect) => ShowAnswer::Run {
                     place: collect.place,
                     run: self.run,
                 },
-                Err(status) => Reply::Status(status),
+                Err(status) => ShowAnswer::Status(status),
             },
 
-            _ => Reply::Status(404),
+            _ => ShowAnswer::Status(404),
         }
     }
 }
@@ -252,7 +252,7 @@ impl Server {
     }
 
     /// Offers one run of the project to whichever place holds it, and waits for how that goes
-    pub fn serve(
+    pub fn offer_run(
         &self,
         manifest: &Manifest,
         timeouts: Timeouts,
@@ -272,14 +272,14 @@ impl Server {
             };
 
             match exchange.answer(request.method(), request.url(), &body) {
-                Answer::Offer(offer) => respond_with(request, 200, offer),
-                Answer::Status(status) => respond(request, status),
-                Answer::Claimed(place) => {
+                RunAnswer::Offer(offer) => respond_with(request, 200, offer),
+                RunAnswer::Status(status) => respond(request, status),
+                RunAnswer::Claimed(place) => {
                     respond(request, 200);
                     on_claim(place);
                     deadline = Instant::now() + timeouts.until_reported;
                 }
-                Answer::Finished(outcome) => {
+                RunAnswer::Finished(outcome) => {
                     respond(request, 200);
                     return Ok(outcome);
                 }
@@ -287,7 +287,7 @@ impl Server {
         }
     }
 
-    pub fn show(
+    pub fn offer_show(
         &self,
         project: &str,
         run: &str,
@@ -308,9 +308,9 @@ impl Server {
             };
 
             match showing.answer(request.method(), request.url(), &body) {
-                Reply::Offer(offer) => respond_with(request, 200, offer),
-                Reply::Status(status) => respond(request, status),
-                Reply::Run { place, run } => {
+                ShowAnswer::Offer(offer) => respond_with(request, 200, offer),
+                ShowAnswer::Status(status) => respond(request, status),
+                ShowAnswer::Run { place, run } => {
                     respond_with(request, 200, run);
                     on_collect(&place);
                 }
@@ -397,17 +397,17 @@ mod tests {
         status_of(exchange.answer(&Method::Post, route, &message.to_string()))
     }
 
-    fn status_of(answer: Answer) -> u16 {
+    fn status_of(answer: RunAnswer) -> u16 {
         match answer {
-            Answer::Status(status) => status,
-            Answer::Offer(_) | Answer::Claimed(_) | Answer::Finished(_) => 200,
+            RunAnswer::Status(status) => status,
+            RunAnswer::Offer(_) | RunAnswer::Claimed(_) | RunAnswer::Finished(_) => 200,
         }
     }
 
     #[test]
     fn the_offer_names_the_run_and_what_to_compare() {
         let mut exchange = exchange();
-        let Answer::Offer(offer) = exchange.answer(&Method::Get, "/offer", "") else {
+        let RunAnswer::Offer(offer) = exchange.answer(&Method::Get, "/offer", "") else {
             panic!("expected the offer");
         };
         let offer: Value = serde_json::from_str(offer).unwrap();
@@ -425,7 +425,7 @@ mod tests {
         let mut exchange = exchange();
         let claim = json!({ "runId": exchange.run_id, "place": "First" }).to_string();
 
-        assert!(matches!(exchange.answer(&Method::Post, "/claim", &claim), Answer::Claimed("First")));
+        assert!(matches!(exchange.answer(&Method::Post, "/claim", &claim), RunAnswer::Claimed("First")));
         assert_eq!(post(&mut exchange, "/claim", json!({ "place": "Second" })), 409);
         assert_eq!(status_of(exchange.answer(&Method::Get, "/offer", "")), 410);
     }
@@ -436,7 +436,7 @@ mod tests {
         post(&mut exchange, "/claim", json!({ "place": "First" }));
 
         let report = json!({ "runId": exchange.run_id, "results": [{ "path": "Thing.spec" }] }).to_string();
-        let Answer::Finished(outcome) = exchange.answer(&Method::Post, "/result", &report) else {
+        let RunAnswer::Finished(outcome) = exchange.answer(&Method::Post, "/result", &report) else {
             panic!("expected the run to finish");
         };
 
@@ -449,7 +449,7 @@ mod tests {
         post(&mut exchange, "/claim", json!({ "place": "First" }));
 
         let report = json!({ "runId": exchange.run_id, "error": "no lib" }).to_string();
-        let Answer::Finished(outcome) = exchange.answer(&Method::Post, "/result", &report) else {
+        let RunAnswer::Finished(outcome) = exchange.answer(&Method::Post, "/result", &report) else {
             panic!("expected the run to finish");
         };
 
@@ -518,7 +518,7 @@ mod tests {
         let collect = json!({ "runId": showing.run_id, "place": place }).to_string();
 
         match showing.answer(&Method::Post, "/collect", &collect) {
-            Reply::Run { place, run } => Some(format!("{place}: {run}")),
+            ShowAnswer::Run { place, run } => Some(format!("{place}: {run}")),
             _ => None,
         }
     }
@@ -526,7 +526,7 @@ mod tests {
     #[test]
     fn a_finished_run_is_offered_as_one_to_show() {
         let showing = showing();
-        let Reply::Offer(offer) = showing.answer(&Method::Get, "/offer", "") else {
+        let ShowAnswer::Offer(offer) = showing.answer(&Method::Get, "/offer", "") else {
             panic!("expected the offer");
         };
         let offer: Value = serde_json::from_str(offer).unwrap();
@@ -544,7 +544,7 @@ mod tests {
 
         assert_eq!(collected(&showing, "First"), Some(format!("First: {run}")));
         assert_eq!(collected(&showing, "Second"), Some(format!("Second: {run}")));
-        assert!(matches!(showing.answer(&Method::Get, "/offer", ""), Reply::Offer(_)));
+        assert!(matches!(showing.answer(&Method::Get, "/offer", ""), ShowAnswer::Offer(_)));
     }
 
     #[test]
@@ -552,9 +552,9 @@ mod tests {
         let showing = showing();
         let stranger = json!({ "runId": "someone-else", "place": "First" }).to_string();
 
-        assert!(matches!(showing.answer(&Method::Post, "/collect", &stranger), Reply::Status(409)));
-        assert!(matches!(showing.answer(&Method::Post, "/collect", "not json"), Reply::Status(400)));
-        assert!(matches!(showing.answer(&Method::Post, "/claim", &stranger), Reply::Status(404)));
+        assert!(matches!(showing.answer(&Method::Post, "/collect", &stranger), ShowAnswer::Status(409)));
+        assert!(matches!(showing.answer(&Method::Post, "/collect", "not json"), ShowAnswer::Status(400)));
+        assert!(matches!(showing.answer(&Method::Post, "/claim", &stranger), ShowAnswer::Status(404)));
     }
 
     /// Plays the plugin's part over a real connection: one request, returning the status and the body
@@ -584,7 +584,7 @@ mod tests {
         let handle = thread::spawn(move || {
             let mut claimed = Vec::new();
             let outcome = server
-                .serve(&manifest(), timeouts, |place| claimed.push(place.to_owned()))
+                .offer_run(&manifest(), timeouts, |place| claimed.push(place.to_owned()))
                 .unwrap();
 
             (outcome, claimed)
@@ -621,7 +621,7 @@ mod tests {
         let handle = thread::spawn(move || {
             let mut collected = Vec::new();
             server
-                .show("demo", r#"{"results":{"specs":[]}}"#, Duration::from_millis(500), |place| {
+                .offer_show("demo", r#"{"results":{"specs":[]}}"#, Duration::from_millis(500), |place| {
                     collected.push(place.to_owned());
                 })
                 .unwrap();

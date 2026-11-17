@@ -14,7 +14,7 @@ pub fn run(manifest: &Manifest) -> Result<Value, String> {
     let server = Server::open()?;
     eprintln!("litmus: waiting for Studio on port {}", server.port());
 
-    let outcome = server.serve(manifest, Timeouts::default(), |place| {
+    let outcome = server.offer_run(manifest, Timeouts::default(), |place| {
         eprintln!("litmus: running in {place}");
     })?;
 

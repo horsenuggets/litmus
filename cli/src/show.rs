@@ -31,7 +31,7 @@ pub fn offer(project_dir: &Path, results: &Value, run: &Run) {
         return;
     };
 
-    let _ = server.show(&name_of(project_dir), &shown, WINDOW, |place| {
+    let _ = server.offer_show(&name_of(project_dir), &shown, WINDOW, |place| {
         eprintln!("litmus: shown in {place}");
     });
 }
