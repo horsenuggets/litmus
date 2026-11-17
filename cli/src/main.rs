@@ -224,10 +224,10 @@ fn test(asked: &Test) -> Result<bool, String> {
 }
 
 fn run_standalone(project_dir: &Path, flags: &[String], selection: &Selection) -> Result<Ran, String> {
-    let runtime = Config::read(project_dir)?.standalone()?;
+    let standalone = Config::read(project_dir)?.standalone()?;
 
     Ok(Ran {
-        results: standalone::run(project_dir, &runtime, flags, selection)?,
+        results: standalone::run(project_dir, &standalone, flags, selection)?,
         sources: Sources::Disk,
     })
 }

@@ -1,4 +1,4 @@
-use super::{MARKER, PROGRESS_MARKER, Runtime};
+use super::{MARKER, PROGRESS_MARKER, Standalone};
 use crate::luau;
 use crate::selection::relative;
 
@@ -7,10 +7,10 @@ const HARNESS: &str = include_str!("harness.luau");
 const MODULE_ENDINGS: [&str; 2] = [".luau", ".lua"];
 const SHIPPED_ADAPTER: &str = "Adapter/Lune";
 
-pub fn script(runtime: &Runtime, specs: &[String], flags: &[String]) -> Result<String, String> {
-    let lib = relative(&runtime.lib)?;
+pub fn script(standalone: &Standalone, specs: &[String], flags: &[String]) -> Result<String, String> {
+    let lib = relative(&standalone.lib)?;
 
-    let adapter = match &runtime.adapter {
+    let adapter = match &standalone.adapter {
         Some(adapter) => module(&relative(adapter)?).to_owned(),
         None => format!("{lib}/{SHIPPED_ADAPTER}"),
     };
@@ -64,12 +64,12 @@ fn from_folder(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::standalone::tests::runtime;
+    use crate::standalone::tests::standalone;
 
     #[test]
     fn the_harness_starts_by_requiring_the_lib_and_its_lune_adapter() {
         let specs = ["tests/a.spec.luau".to_owned(), "tests/b \"c\".spec.luau".to_owned()];
-        let script = script(&runtime(), &specs, &["coverage".to_owned()]).unwrap();
+        let script = script(&standalone(), &specs, &["coverage".to_owned()]).unwrap();
 
         let header = r#"local litmus = require("../submodules/litmus/lib")
 local adapter = require("../submodules/litmus/lib/Adapter/Lune")
@@ -98,13 +98,13 @@ local options = {
 
     #[test]
     fn the_harness_requires_the_adapter_the_project_names() {
-        let runtime = Runtime {
+        let standalone = Standalone {
             lib: "..\\shared\\lib".to_owned(),
             adapter: Some("./tools/adapter.luau".to_owned()),
-            ..runtime()
+            ..standalone()
         };
 
-        let script = script(&runtime, &[], &[]).unwrap();
+        let script = script(&standalone, &[], &[]).unwrap();
 
         let requires = "local litmus = require(\"../../shared/lib\")\nlocal adapter = require(\"../tools/adapter\")\n";
         let options = "local options = {\n    lib = \"../shared/lib\",\n\n    specs = {},\n\n    flags = {},\n}\n";

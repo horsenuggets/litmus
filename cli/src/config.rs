@@ -1,5 +1,5 @@
 use crate::cloud::Target;
-use crate::standalone::Runtime;
+use crate::standalone::Standalone;
 use serde::Deserialize;
 use std::fs;
 use std::io::ErrorKind;
@@ -11,7 +11,7 @@ const FILE: &str = "litmus.toml";
 #[serde(deny_unknown_fields)]
 pub struct Config {
     cloud: Option<Target>,
-    standalone: Option<Runtime>,
+    standalone: Option<Standalone>,
     rojo: Option<Rojo>,
 }
 
@@ -33,8 +33,8 @@ impl Config {
     fn parse(text: &str) -> Result<Config, String> {
         let config: Config = toml::from_str(text).map_err(|error| format!("couldn't read {FILE}: {error}"))?;
 
-        if let Some(runtime) = &config.standalone {
-            runtime
+        if let Some(standalone) = &config.standalone {
+            standalone
                 .check()
                 .map_err(|problem| format!("{FILE} has a [standalone] table that doesn't add up: {problem}"))?;
         }
@@ -64,7 +64,7 @@ impl Config {
         })
     }
 
-    pub fn standalone(self) -> Result<Runtime, String> {
+    pub fn standalone(self) -> Result<Standalone, String> {
         self.standalone.ok_or_else(|| {
             format!(
                 "{FILE} names no command to run the tests with; it needs a [standalone] table with \
@@ -149,7 +149,7 @@ mod tests {
 
         assert_eq!(
             config.standalone(),
-            Ok(Runtime {
+            Ok(Standalone {
                 run: vec!["lune".to_owned(), "run".to_owned()],
                 lib: "lib".to_owned(),
                 specs: vec!["tests".to_owned()],
@@ -162,10 +162,10 @@ mod tests {
     #[test]
     fn reads_the_adapter_and_the_flags_a_project_adds() {
         let text = format!("{STANDALONE}adapter = \"tools/adapter.luau\"\nflags = [\"coverage\"]\n");
-        let runtime = Config::parse(&text).unwrap().standalone().unwrap();
+        let standalone = Config::parse(&text).unwrap().standalone().unwrap();
 
-        assert_eq!(runtime.adapter, Some("tools/adapter.luau".to_owned()));
-        assert_eq!(runtime.flags, ["coverage"]);
+        assert_eq!(standalone.adapter, Some("tools/adapter.luau".to_owned()));
+        assert_eq!(standalone.flags, ["coverage"]);
     }
 
     #[test]
