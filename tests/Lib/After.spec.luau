@@ -4,7 +4,7 @@ local litmus = require("../../Litmus")
 local expect = litmus.expect
 local test = litmus.test
 
-local ran: litmus.SpecResult = anchor.run("Lib", "After")
+local spec: litmus.SpecResult = anchor.run("Lib", "After")
 
 local function adapterFor(load: () -> ()): litmus.Adapter
     return {
@@ -22,7 +22,7 @@ end
 
 test("lists every after last, in the order registered", function(): ()
     local names: { string } = {}
-    for index, result in ran.tests do
+    for index, result in spec.tests do
         names[index] = result.name
     end
 
@@ -38,11 +38,11 @@ test("lists every after last, in the order registered", function(): ()
 end)
 
 test("runs an after once every test has finished, whether it waited or failed", function(): ()
-    expect.equal(anchor.test(ran, "runs once every test has finished").failure, nil)
+    expect.equal(anchor.resultOf(spec, "runs once every test has finished").failure, nil)
 end)
 
 test("reports an after that fails as a failed test", function(): ()
-    local failure: litmus.Failure = anchor.failureOf(ran, "fails like a test")
+    local failure: litmus.Failure = anchor.failureOf(spec, "fails like a test")
 
     expect.equal(failure.message, "Lib.After.spec:11: boom")
     expect.same(failure.source, { "Lib", "After.spec" })
@@ -50,15 +50,15 @@ test("reports an after that fails as a failed test", function(): ()
 end)
 
 test("gives an after no groups", function(): ()
-    expect.same(anchor.test(ran, "runs once every test has finished").groups, {})
+    expect.same(anchor.resultOf(spec, "runs once every test has finished").groups, {})
 end)
 
 test("refuses an after registered inside a group", function(): ()
-    expect.equal(anchor.test(ran, "refuses an after registered inside a group").failure, nil)
+    expect.equal(anchor.resultOf(spec, "refuses an after registered inside a group").failure, nil)
 end)
 
 test("refuses an after registered while tests run", function(): ()
-    expect.equal(anchor.test(ran, "refuses an after registered while tests run").failure, nil)
+    expect.equal(anchor.resultOf(spec, "refuses an after registered while tests run").failure, nil)
 end)
 
 test("runs the afters of a spec with no tests", function(): ()

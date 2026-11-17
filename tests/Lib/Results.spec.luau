@@ -27,10 +27,10 @@ test("reports a spec by the names leading to it", function(): ()
 end)
 
 test("reports a spec that registers nothing as loaded, with no tests", function(): ()
-    local ran: litmus.SpecResult = anchor.run("Lib", "Empty")
+    local spec: litmus.SpecResult = anchor.run("Lib", "Empty")
 
-    expect.equal(ran.failure, nil)
-    expect.same(ran.tests, {})
+    expect.equal(spec.failure, nil)
+    expect.same(spec.tests, {})
 end)
 
 group("appendix", function(): ()

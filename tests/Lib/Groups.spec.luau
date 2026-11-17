@@ -4,15 +4,15 @@ local litmus = require("../../Litmus")
 local expect = litmus.expect
 local test = litmus.test
 
-local ran: litmus.SpecResult = anchor.run("Lib", "Groups")
+local spec: litmus.SpecResult = anchor.run("Lib", "Groups")
 
 local function groupsOf(name: string): { string }
-    return anchor.test(ran, name).groups
+    return anchor.resultOf(spec, name).groups
 end
 
 test("lists tests in the order they were registered", function(): ()
     local names: { string } = {}
-    for index, result in ran.tests do
+    for index, result in spec.tests do
         names[index] = result.name
     end
 
@@ -40,5 +40,5 @@ test("leaves a group when its body ends", function(): ()
 end)
 
 test("passes a test whose body does nothing", function(): ()
-    expect.equal(anchor.test(ran, "sits in one group").failure, nil)
+    expect.equal(anchor.resultOf(spec, "sits in one group").failure, nil)
 end)

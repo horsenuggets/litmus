@@ -5,14 +5,14 @@ local expect = litmus.expect
 local group = litmus.group
 local test = litmus.test
 
-local ran: litmus.SpecResult = anchor.run("Lib", "Expect")
+local spec: litmus.SpecResult = anchor.run("Lib", "Expect")
 
 local function passed(name: string): boolean
-    return anchor.test(ran, name).failure == nil
+    return anchor.resultOf(spec, name).failure == nil
 end
 
 local function messageOf(name: string): string
-    return anchor.failureOf(ran, name).message
+    return anchor.failureOf(spec, name).message
 end
 
 group("equal", function(): ()

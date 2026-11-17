@@ -41,8 +41,8 @@ function anchor.run(folder: string, name: string): litmus.SpecResult
     return ran.specs[1]
 end
 
-function anchor.test(ran: litmus.SpecResult, name: string): litmus.TestResult
-    for _, test in ran.tests do
+function anchor.resultOf(spec: litmus.SpecResult, name: string): litmus.TestResult
+    for _, test in spec.tests do
         if test.name == name then
             return test
         end
@@ -52,8 +52,8 @@ function anchor.test(ran: litmus.SpecResult, name: string): litmus.TestResult
 end
 
 -- How the test called `name` failed, for a test that is meant to
-function anchor.failureOf(ran: litmus.SpecResult, name: string): litmus.Failure
-    local failure: litmus.Failure? = anchor.test(ran, name).failure
+function anchor.failureOf(spec: litmus.SpecResult, name: string): litmus.Failure
+    local failure: litmus.Failure? = anchor.resultOf(spec, name).failure
     if not failure then
         error(`[Anchor]: "{name}" passed, and was meant to fail`, 2)
     end
@@ -62,8 +62,8 @@ function anchor.failureOf(ran: litmus.SpecResult, name: string): litmus.Failure
 end
 
 -- Why the spec didn't load, for a spec that is meant not to
-function anchor.refusalOf(ran: litmus.SpecResult): litmus.Failure
-    local failure: litmus.Failure? = ran.failure
+function anchor.refusalOf(spec: litmus.SpecResult): litmus.Failure
+    local failure: litmus.Failure? = spec.failure
     if not failure then
         error("[Anchor]: the spec loaded, and was meant not to", 2)
     end
