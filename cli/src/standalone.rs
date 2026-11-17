@@ -155,16 +155,32 @@ fn harness(runtime: &Runtime, specs: &[String], flags: &[String]) -> Result<Stri
         .map(|flag| format!("[{}] = true", luau::string(flag)))
         .collect();
 
-    Ok(format!(
-        "local litmus, adapter, options, MARKER = require({}), require({}), \
-         {{ lib = {}, specs = {{ {} }}, flags = {{ {} }} }}, {}\n{HARNESS}",
-        luau::string(&from_folder(&lib)),
-        luau::string(&from_folder(&adapter)),
-        luau::string(&lib),
-        specs.join(", "),
-        flags.join(", "),
-        luau::string(MARKER),
-    ))
+    let header = [
+        format!("local litmus = require({})", luau::string(&from_folder(&lib))),
+        format!("local adapter = require({})", luau::string(&from_folder(&adapter))),
+        String::new(),
+        format!("local marker = {}", luau::string(MARKER)),
+        String::new(),
+        "local options = {".to_owned(),
+        format!("    lib = {},", luau::string(&lib)),
+        String::new(),
+        format!("    specs = {},", table(&specs)),
+        String::new(),
+        format!("    flags = {},", table(&flags)),
+        "}".to_owned(),
+    ];
+
+    Ok(format!("{}\n\n{HARNESS}", header.join("\n")))
+}
+
+fn table(entries: &[String]) -> String {
+    if entries.is_empty() {
+        return "{}".to_owned();
+    }
+
+    let lines: Vec<String> = entries.iter().map(|entry| format!("        {entry},\n")).collect();
+
+    format!("{{\n{}    }}", lines.concat())
 }
 
 fn module(file: &str) -> &str {
@@ -331,17 +347,29 @@ mod tests {
     fn the_harness_starts_by_requiring_the_lib_and_its_lune_adapter() {
         let specs = ["tests/a.spec.luau".to_owned(), "tests/b \"c\".spec.luau".to_owned()];
         let script = harness(&runtime(), &specs, &["coverage".to_owned()]).unwrap();
-        let first = script.lines().next().unwrap();
 
-        assert_eq!(
-            first,
-            "local litmus, adapter, options, MARKER = \
-             require(\"../submodules/litmus/lib\"), require(\"../submodules/litmus/lib/Adapter/Lune\"), \
-             { lib = \"submodules/litmus/lib\", \
-             specs = { \"tests/a.spec.luau\", \"tests/b \\034c\\034.spec.luau\" }, \
-             flags = { [\"coverage\"] = true } }, \"@@litmus-run@@\""
-        );
-        assert!(script.ends_with("print(MARKER .. encode(litmus.run(adapter(options))))\n"), "{script}");
+        let header = r#"local litmus = require("../submodules/litmus/lib")
+local adapter = require("../submodules/litmus/lib/Adapter/Lune")
+
+local marker = "@@litmus-run@@"
+
+local options = {
+    lib = "submodules/litmus/lib",
+
+    specs = {
+        "tests/a.spec.luau",
+        "tests/b \034c\034.spec.luau",
+    },
+
+    flags = {
+        ["coverage"] = true,
+    },
+}
+
+"#;
+
+        assert!(script.starts_with(header), "{script}");
+        assert!(script.ends_with("print(marker .. encode(litmus.run(adapter(options))))\n"), "{script}");
     }
 
     #[test]
@@ -353,10 +381,12 @@ mod tests {
         };
 
         let script = harness(&runtime, &[], &[]).unwrap();
-        let first = script.lines().next().unwrap();
 
-        assert!(first.contains("require(\"../../shared/lib\"), require(\"../tools/adapter\"), "), "{first}");
-        assert!(first.contains("{ lib = \"../shared/lib\", specs = {  }, flags = {  } }"), "{first}");
+        let requires = "local litmus = require(\"../../shared/lib\")\nlocal adapter = require(\"../tools/adapter\")\n";
+        let options = "local options = {\n    lib = \"../shared/lib\",\n\n    specs = {},\n\n    flags = {},\n}\n";
+
+        assert!(script.starts_with(requires), "{script}");
+        assert!(script.contains(options), "{script}");
     }
 
     #[test]

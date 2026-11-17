@@ -1,4 +1,4 @@
-local ESCAPES: { [string]: string } = {
+local escapes: { [string]: string } = {
     ['"'] = '\\"',
     ["\\"] = "\\\\",
     ["\n"] = "\\n",
@@ -8,7 +8,7 @@ local ESCAPES: { [string]: string } = {
 
 local function encodeString(text: string): string
     local escaped: string = string.gsub(text, '[%c"\\]', function(character: string): string
-        return ESCAPES[character] or string.format("\\u%04x", string.byte(character))
+        return escapes[character] or string.format("\\u%04x", string.byte(character))
     end)
 
     return `"{escaped}"`
@@ -38,4 +38,4 @@ local function encode(value: any): string
     return `\{{table.concat(parts, ",")}}`
 end
 
-print(MARKER .. encode(litmus.run(adapter(options))))
+print(marker .. encode(litmus.run(adapter(options))))
