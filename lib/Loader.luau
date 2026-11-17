@@ -11,6 +11,7 @@ export type Host = {
     resolve: (from: Module, target: unknown) -> Module,
     load: (module: Module, globals: { [string]: any }) -> (...any) -> ...any,
     findSpecs: (roots: { any }) -> { Module },
+    spawn: (run: (() -> ()) | thread) -> (),
 }
 
 -- Boxed because a module can return nil

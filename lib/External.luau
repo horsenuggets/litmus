@@ -112,6 +112,10 @@ function external.findSpecs(roots: { Instance }): { ModuleScript }
     return specs
 end
 
+function external.spawn(run: (() -> ()) | thread): ()
+    task.spawn(run)
+end
+
 -- The way in: a script outside the lib loads this module alone, then hands it the lib to run through
 function external.run(lib: ModuleScript, roots: { Instance }): any
     local loaderModule: Instance? = lib:FindFirstChild("Loader")

@@ -46,7 +46,32 @@ local function report(session: loader.Class, caught: failure.Failure?): Failure?
     }
 end
 
-local function runSpec(session: loader.Class, spec: loader.Module): SpecResult
+type Running = {
+    count: number,
+    waiter: thread?,
+}
+
+local function start(running: Running, body: () -> ()): ()
+    running.count += 1
+
+    external.spawn(function(): ()
+        body()
+        running.count -= 1
+
+        if running.count == 0 and running.waiter then
+            external.spawn(running.waiter)
+        end
+    end)
+end
+
+local function waitFor(running: Running): ()
+    if running.count > 0 then
+        running.waiter = coroutine.running()
+        coroutine.yield()
+    end
+end
+
+local function runSpec(session: loader.Class, spec: loader.Module, running: Running): SpecResult
     collector.begin()
 
     local problem: failure.Failure? = failure.catch(function(): ()
@@ -58,11 +83,12 @@ local function runSpec(session: loader.Class, spec: loader.Module): SpecResult
 
     if not problem then
         for _, test in tests do
-            table.insert(results, {
-                name = test.name,
-                groups = test.groups,
-                failure = report(session, failure.catch(test.run)),
-            })
+            local result: TestResult = { name = test.name, groups = test.groups }
+            table.insert(results, result)
+
+            start(running, function(): ()
+                result.failure = report(session, failure.catch(test.run))
+            end)
         end
     end
 
@@ -78,10 +104,13 @@ local runner = {}
 -- `session` must be the one this lib was loaded through, or specs register with another copy
 function runner.run(session: loader.Class, roots: { any }): { SpecResult }
     local results: { SpecResult } = {}
+    local running: Running = { count = 0, waiter = nil }
 
     for _, spec in external.findSpecs(roots) do
-        table.insert(results, runSpec(session, spec))
+        table.insert(results, runSpec(session, spec, running))
     end
+
+    waitFor(running)
 
     return results
 end
