@@ -1,4 +1,4 @@
-local function shares(values: { number }, cells: number): { number }
+local function shares(values: { number }, steps: number): { number }
     local total: number = 0
     for _, value in values do
         total += math.max(value, 0)
@@ -9,27 +9,27 @@ local function shares(values: { number }, cells: number): { number }
     local widest: number = 0
 
     for index, value in values do
-        local share: number = if total > 0 then math.max(value, 0) * cells / total else 0
-        local cell: number = math.floor(share + 0.5)
+        local share: number = if total > 0 then math.max(value, 0) * steps / total else 0
+        local step: number = math.floor(share + 0.5)
 
         if value > 0 then
-            cell = math.max(cell, 1)
+            step = math.max(step, 1)
         end
 
         if total <= 0 and index == #values then
-            cell = cells
+            step = steps
         end
 
-        given[index] = cell
-        used += cell
+        given[index] = step
+        used += step
 
-        if widest == 0 or cell > given[widest] then
+        if widest == 0 or step > given[widest] then
             widest = index
         end
     end
 
     if widest > 0 then
-        given[widest] = math.max(given[widest] + cells - used, 0)
+        given[widest] = math.max(given[widest] + steps - used, 0)
     end
 
     return given

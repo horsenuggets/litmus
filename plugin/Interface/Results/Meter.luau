@@ -16,8 +16,8 @@ type Stretch = {
     color: flux.Computed<Color3>,
 }
 
-local CELLS: number = 24
-local CELL_WIDTH: number = 4
+local STEPS: number = 24
+local STEP_WIDTH: number = 4
 local HEIGHT: number = 8
 
 local EDGE: number = 0.001
@@ -34,23 +34,23 @@ local function meter(scope: flux.Scope, props: Props): Frame
     local stretches: { Stretch } = {}
     local passed: number = 0
 
-    for index, cells in shares(values, CELLS) do
-        if cells > 0 then
+    for index, steps in shares(values, STEPS) do
+        if steps > 0 then
             table.insert(stretches, {
-                from = passed / CELLS,
-                to = (passed + cells) / CELLS,
+                from = passed / STEPS,
+                to = (passed + steps) / STEPS,
                 color = tone.fill(colors, props.parts[index].tone),
             })
         end
 
-        passed += cells
+        passed += steps
     end
 
     return scope:element "Frame" {
         Name = "Meter",
         LayoutOrder = props.layoutOrder,
 
-        Size = UDim2.fromOffset(CELLS * CELL_WIDTH, HEIGHT),
+        Size = UDim2.fromOffset(STEPS * STEP_WIDTH, HEIGHT),
 
         BackgroundColor3 = WHITE,
         BackgroundTransparency = if #stretches > 0 then 0 else 1,
