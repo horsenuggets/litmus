@@ -1,4 +1,5 @@
 mod cloud;
+mod component;
 mod config;
 mod luau;
 mod manifest;

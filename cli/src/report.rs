@@ -1,5 +1,6 @@
+use crate::component;
 use crate::manifest::Manifest;
-use crate::results::{Failure, Run, SpecResult, Tally};
+use crate::results::{Appendix, Failure, Run, SpecResult, Tally};
 use crate::server::Mismatch;
 use anstyle::{AnsiColor, Color, RgbColor, Style};
 use std::collections::HashMap;
@@ -97,7 +98,11 @@ pub fn render(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
     }
 
     if let Some(appendix) = &run.appendix {
-        lines.extend(appendix.trim_end().lines().map(str::to_owned));
+        match appendix {
+            Appendix::Text(text) => lines.extend(text.trim_end().lines().map(str::to_owned)),
+            Appendix::Components(components) => lines.extend(component::render(components)),
+        }
+
         lines.push(String::new());
     }
 
@@ -331,7 +336,7 @@ mod tests {
     fn run(results: &str, appendix: Option<&str>) -> Run {
         Run {
             specs: serde_json::from_str(results).unwrap(),
-            appendix: appendix.map(str::to_owned),
+            appendix: appendix.map(|text| Appendix::Text(text.to_owned())),
             failure: None,
         }
     }
@@ -489,6 +494,14 @@ Coverage 4%
 ";
 
         assert_eq!(plain_run(&run, None), expected);
+    }
+
+    #[test]
+    fn draws_the_components_an_adapter_added_where_its_text_would_go() {
+        let mut run = run("[]", None);
+        run.appendix = serde_json::from_str(r#"[{ "kind": "heading", "text": "Lines run" }]"#).unwrap();
+
+        assert_eq!(plain_run(&run, None), "\n Lines run\n\n Specs  none\n Tests  none\n");
     }
 
     #[test]

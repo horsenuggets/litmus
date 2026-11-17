@@ -1,3 +1,4 @@
+use crate::component::Component;
 use crate::manifest::InstancePath;
 use serde::Deserialize;
 
@@ -25,9 +26,16 @@ pub struct SpecResult {
 }
 
 #[derive(Deserialize)]
+#[serde(untagged)]
+pub enum Appendix {
+    Text(String),
+    Components(Vec<Component>),
+}
+
+#[derive(Deserialize)]
 pub struct Run {
     pub specs: Vec<SpecResult>,
-    pub appendix: Option<String>,
+    pub appendix: Option<Appendix>,
     pub failure: Option<String>,
 }
 
@@ -123,6 +131,7 @@ mod tests {
 
         assert!(run("").passed());
         assert!(run(r#", "appendix": "text""#).passed());
+        assert!(run(r#", "appendix": [{ "kind": "heading", "text": "Lines run" }]"#).passed());
         assert!(!run(r#", "failure": "too little ran""#).passed());
     }
 
