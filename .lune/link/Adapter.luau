@@ -116,9 +116,11 @@ local function hostOf(place: Place, lib: any): any
     local shared: { [string]: any } = table.clone(globals)
     shared.loadstring = function(source: string, name: string): (Chunk?, string?)
         if name == libChunk then
-            return function(): any
+            local function chunk()
                 return litmus
-            end, nil
+            end
+            
+            return chunk, nil
         end
 
         return globals.loadstring(source, name)
