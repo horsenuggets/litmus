@@ -83,15 +83,15 @@ impl Backend {
 }
 
 #[derive(Debug, PartialEq)]
-struct Test {
+struct TestCommand {
     backend: Backend,
     flags: Vec<String>,
     paths: Vec<String>,
 }
 
-impl Test {
+impl TestCommand {
     /// None when the options don't add up to one place to run in
-    fn parse(options: &[&str]) -> Option<Test> {
+    fn parse(options: &[&str]) -> Option<TestCommand> {
         let mut backend = None;
         let mut flags = Vec::new();
         let mut paths = Vec::new();
@@ -114,7 +114,7 @@ impl Test {
             }
         }
 
-        Some(Test {
+        Some(TestCommand {
             backend: backend.unwrap_or(Backend::Plugin),
             flags,
             paths,
@@ -129,7 +129,7 @@ struct Ran {
 
 #[derive(Debug, PartialEq)]
 enum Command {
-    Test(Test),
+    Test(TestCommand),
     PluginInstall,
     PluginUninstall,
     Help,
@@ -142,7 +142,7 @@ impl Command {
         let words: Vec<&str> = arguments.iter().map(AsRef::as_ref).collect();
 
         match words.as_slice() {
-            ["test", options @ ..] => Test::parse(options).map(Command::Test),
+            ["test", options @ ..] => TestCommand::parse(options).map(Command::Test),
             ["plugin", "install"] => Some(Command::PluginInstall),
             ["plugin", "uninstall"] => Some(Command::PluginUninstall),
             ["--help" | "-h"] => Some(Command::Help),
@@ -154,7 +154,7 @@ impl Command {
     /// False only when tests ran and didn't all pass
     fn run(self) -> Result<bool, String> {
         match self {
-            Command::Test(asked) => test(&asked),
+            Command::Test(command) => run_tests(&command),
             Command::PluginInstall => plugin::install().and(Ok(true)),
             Command::PluginUninstall => plugin::uninstall().and(Ok(true)),
             Command::Help => {
@@ -189,23 +189,23 @@ fn main() -> ExitCode {
 }
 
 /// Whether every spec loaded, every test passed and the adapter failed nothing
-fn test(asked: &Test) -> Result<bool, String> {
+fn run_tests(command: &TestCommand) -> Result<bool, String> {
     let project_dir = Path::new(".");
 
-    if asked.backend != Backend::Standalone
-        && let Some(flag) = asked.flags.first()
+    if command.backend != Backend::Standalone
+        && let Some(flag) = command.flags.first()
     {
         return Err(format!(
             "--{flag} isn't an option of litmus; a flag of the project's own goes with --standalone"
         ));
     }
 
-    let selection = Selection::of(&asked.paths)?;
+    let selection = Selection::of(&command.paths)?;
 
-    let ran = match asked.backend {
+    let ran = match command.backend {
         Backend::Plugin => run_with_plugin(project_dir, &selection)?,
         Backend::Cloud => run_in_cloud(project_dir, &selection)?,
-        Backend::Standalone => run_standalone(project_dir, &asked.flags, &selection)?,
+        Backend::Standalone => run_standalone(project_dir, &command.flags, &selection)?,
     };
 
     let run = Run::deserialize(&ran.results)
@@ -216,7 +216,7 @@ fn test(asked: &Test) -> Result<bool, String> {
 
     anstream::print!("{}", render::run(&run, &ran.sources, columns));
 
-    if asked.backend == Backend::Standalone && io::stdout().is_terminal() {
+    if command.backend == Backend::Standalone && io::stdout().is_terminal() {
         show::offer(project_dir, &ran.results, &run);
     }
 
@@ -275,7 +275,7 @@ mod tests {
     }
 
     fn test_of(backend: Backend, flags: &[&str], paths: &[&str]) -> Option<Command> {
-        Some(Command::Test(Test {
+        Some(Command::Test(TestCommand {
             backend,
             flags: flags.iter().map(|flag| (*flag).to_owned()).collect(),
             paths: paths.iter().map(|path| (*path).to_owned()).collect(),
@@ -335,13 +335,13 @@ mod tests {
 
     #[test]
     fn a_flag_of_the_project_only_goes_with_a_standalone_run() {
-        let asked = Test {
+        let command = TestCommand {
             backend: Backend::Cloud,
             flags: vec!["coverage".to_owned()],
             paths: vec![],
         };
 
-        let problem = test(&asked).unwrap_err();
+        let problem = run_tests(&command).unwrap_err();
 
         assert!(problem.contains("--coverage") && problem.contains("--standalone"), "{problem}");
     }
