@@ -209,30 +209,36 @@ fn execute(project_dir: &Path, run: &[String]) -> Result<String, String> {
         return Err(format!("`{shown}` was stopped, still running after {} minutes", BUDGET.as_secs() / 60));
     };
 
-    let status = child
-        .wait()
-        .map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))?;
+    let Some(reported) = reported else {
+        let status = child
+            .wait()
+            .map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))?;
 
-    reported.ok_or_else(|| format!("`{shown}` ended without reporting any results ({status})"))
+        return Err(format!("`{shown}` ended without reporting any results ({status})"));
+    };
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    Ok(reported)
 }
 
 fn relay(mut output: impl BufRead, mut pass: impl FnMut(&str)) -> Option<String> {
-    let mut reported = None;
     let mut line = Vec::new();
 
     while output.read_until(b'\n', &mut line).is_ok_and(|read| read > 0) {
         let text = String::from_utf8_lossy(&line);
         let text = text.trim_end_matches(['\n', '\r']);
 
-        match text.strip_prefix(MARKER) {
-            Some(results) => reported = Some(results.to_owned()),
-            None => pass(text),
+        if let Some(results) = text.strip_prefix(MARKER) {
+            return Some(results.to_owned());
         }
 
+        pass(text);
         line.clear();
     }
 
-    reported
+    None
 }
 
 #[cfg(test)]
@@ -405,14 +411,14 @@ mod tests {
     }
 
     #[test]
-    fn keeps_the_marked_line_and_passes_the_rest_on() {
-        let output = "first\r\n@@litmus-run@@{\"specs\":[]}\nlast";
+    fn passes_lines_on_until_the_marked_one_and_reads_no_further() {
+        let output = "first\r\nsecond\n@@litmus-run@@{\"specs\":[]}\nlast";
         let mut passed = Vec::new();
 
         let reported = relay(Cursor::new(output), |line| passed.push(line.to_owned()));
 
         assert_eq!(reported, Some("{\"specs\":[]}".to_owned()));
-        assert_eq!(passed, ["first", "last"]);
+        assert_eq!(passed, ["first", "second"]);
     }
 
     #[test]
@@ -444,6 +450,27 @@ mod tests {
 
         assert_eq!(reported, Ok(serde_json::json!({ "specs": [] })));
         assert!(written.unwrap().contains("\"tests/a.spec.luau\""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_run_is_over_once_it_reported_even_if_the_command_goes_on() {
+        let dir = project("lingers", &["tests/a.spec.luau"]);
+        let runtime = Runtime {
+            run: vec![
+                "sh".to_owned(),
+                "-c".to_owned(),
+                "echo '@@litmus-run@@{\"specs\":[]}'; exec sleep 60".to_owned(),
+            ],
+            ..runtime()
+        };
+
+        let started = std::time::Instant::now();
+        let reported = run(&dir, &runtime, &[]);
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(reported, Ok(serde_json::json!({ "specs": [] })));
+        assert!(started.elapsed() < Duration::from_secs(30), "{:?}", started.elapsed());
     }
 
     #[cfg(unix)]
