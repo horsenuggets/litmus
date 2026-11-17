@@ -112,6 +112,19 @@ group("arranged", function(): ()
     end)
 end)
 
+group("ofLib", function(): ()
+    test("makes a run of what the lib returned", function(): ()
+        expect.same(outcome.ofLib({ specs = { PASSED }, appendix = "text", failure = "too little ran" }), {
+            kind = "results",
+            results = { PASSED },
+            appendix = "text",
+            failure = "too little ran",
+        })
+
+        expect.same(outcome.ofLib({ specs = {} }), { kind = "results", results = {} })
+    end)
+end)
+
 group("resultsOf", function(): ()
     test("gives a run's results", function(): ()
         expect.same(outcome.resultsOf({ kind = "results", results = { PASSED, FAILED } }), { PASSED, FAILED })

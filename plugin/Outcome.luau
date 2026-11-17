@@ -60,6 +60,12 @@ export type Run =
     { kind: "results", results: { SpecResult }, appendix: Appendix?, failure: string? }
     | { kind: "problem", message: string }
 
+export type LibRun = {
+    specs: { SpecResult },
+    appendix: Appendix?,
+    failure: string?,
+}
+
 export type Status = "PASS" | "FAIL" | "ERROR"
 
 export type Tally = {
@@ -72,6 +78,10 @@ export type Tally = {
 }
 
 local outcome = {}
+
+function outcome.ofLib(ran: LibRun): Run
+    return { kind = "results", results = ran.specs, appendix = ran.appendix, failure = ran.failure }
+end
 
 -- A run that couldn't happen has no specs to show, which is what everything counting them should see
 function outcome.resultsOf(ran: Run): { SpecResult }
