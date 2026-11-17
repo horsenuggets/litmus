@@ -14,7 +14,7 @@ const TICK: Duration = Duration::from_millis(100);
 enum Message {
     Printed(String),
     Event(Event),
-    Reported(String),
+    Results(String),
 }
 
 pub fn run(project_dir: &Path, run: &[String], specs: &[String]) -> Result<String, String> {
@@ -46,7 +46,7 @@ pub fn run(project_dir: &Path, run: &[String], specs: &[String]) -> Result<Strin
         match receiver.recv_timeout(TICK) {
             Ok(Message::Printed(line)) => display.print(&line),
             Ok(Message::Event(event)) => display.take(event),
-            Ok(Message::Reported(results)) => break Some(results),
+            Ok(Message::Results(results)) => break Some(results),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break None,
         }
@@ -85,7 +85,7 @@ fn relay(mut output: impl BufRead, mut pass: impl FnMut(Message) -> bool) {
     while output.read_until(b'\n', &mut line).is_ok_and(|read| read > 0) {
         let text = String::from_utf8_lossy(&line);
         let message = read(text.trim_end_matches(['\n', '\r']));
-        let last = matches!(message, Some(Message::Reported(_)));
+        let last = matches!(message, Some(Message::Results(_)));
 
         if message.is_some_and(|message| !pass(message)) || last {
             return;
@@ -97,7 +97,7 @@ fn relay(mut output: impl BufRead, mut pass: impl FnMut(Message) -> bool) {
 
 fn read(text: &str) -> Option<Message> {
     if let Some(results) = text.strip_prefix(MARKER) {
-        return Some(Message::Reported(results.to_owned()));
+        return Some(Message::Results(results.to_owned()));
     }
 
     match text.strip_prefix(PROGRESS_MARKER) {
@@ -132,7 +132,7 @@ mod tests {
 
         assert_eq!(
             passed,
-            [printed("first"), printed("second"), Message::Reported("{\"specs\":[]}".to_owned())]
+            [printed("first"), printed("second"), Message::Results("{\"specs\":[]}".to_owned())]
         );
     }
 

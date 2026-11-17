@@ -93,7 +93,7 @@ local options = {
 "#;
 
         assert!(script.starts_with(header), "{script}");
-        assert!(script.ends_with("print(marker .. encode(litmus.run(adapter(options), report)))\n"), "{script}");
+        assert!(script.ends_with("print(marker .. encode(litmus.run(adapter(options), observe)))\n"), "{script}");
     }
 
     #[test]
