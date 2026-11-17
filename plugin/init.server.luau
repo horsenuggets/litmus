@@ -13,11 +13,11 @@ local theme = require("@self/Interface/Theme")
 local watcher = require("@self/Watcher")
 
 -- Where a run was started from, which the results window's title says
-type Source = "Test" | "CLI" | "Standalone"
+type Origin = "Test" | "CLI" | "Standalone"
 
 -- What the results window is showing
 type Shown = {
-    source: Source,
+    origin: Origin,
     ran: outcome.Run,
     sourceAt: sources.Reader,
 }
@@ -92,13 +92,13 @@ end)
 local function show(showing: Shown): ()
     shown:set(showing)
 
-    resultsWindow.Title = `Litmus: {showing.source}`
+    resultsWindow.Title = `Litmus: {showing.origin}`
     resultsWindow.Enabled = true
 end
 
 local function showArrival(arrived: watcher.Arrival): ()
     show({
-        source = arrived.origin,
+        origin = arrived.origin,
         ran = arrived.ran,
         sourceAt = arrived.sourceAt,
     })
@@ -108,7 +108,7 @@ local function cliRan(arrived: watcher.Arrival): ()
     local showing: Shown? = flux.peek(shown)
 
     -- A window already open on the CLI's results takes the new ones at once, which leaves nothing unseen
-    local seen: boolean = resultsWindow.Enabled and showing ~= nil and showing.source ~= "Test"
+    local seen: boolean = resultsWindow.Enabled and showing ~= nil and showing.origin ~= "Test"
     cliRun:set({ arrived = arrived, seen = seen })
 
     if seen then
@@ -123,7 +123,7 @@ control(scope, {
     end,
 
     testActivated = function(): ()
-        show({ source = "Test", ran = run.all(), sourceAt = place.sourceAt })
+        show({ origin = "Test", ran = run.all(), sourceAt = place.sourceAt })
     end,
 
     cliResults = scope:computed(function(use: flux.Use): control.CliResults
