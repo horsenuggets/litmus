@@ -5,7 +5,7 @@ local run = require("./Run")
 
 export type Arrival = {
     ran: outcome.Run,
-    standalone: boolean,
+    origin: "CLI" | "Standalone",
     sourceAt: (path: outcome.Path) -> string?,
 }
 
@@ -43,7 +43,7 @@ local function collected(offer: bridge.ShowOffer): Arrival?
 
     return {
         ran = outcome.ofLib(shown.results),
-        standalone = true,
+        origin = "Standalone",
 
         sourceAt = function(path: outcome.Path): string?
             return texts[table.concat(path, "/")]
@@ -90,7 +90,7 @@ local function answer(offer: bridge.Offer): (boolean, Arrival?)
         warn(`[Litmus]: ran {offer.project}, but couldn't send the results back`)
     end
 
-    return true, { ran = ran, standalone = false, sourceAt = place.sourceAt }
+    return true, { ran = ran, origin = "CLI", sourceAt = place.sourceAt }
 end
 
 -- One loop per port: Windows takes two seconds to refuse an idle port, and a shared round made every run wait for all of them

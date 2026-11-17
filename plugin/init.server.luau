@@ -98,7 +98,7 @@ end
 
 local function showArrival(arrived: watcher.Arrival): ()
     show({
-        source = if arrived.standalone then "Standalone" else "CLI",
+        source = arrived.origin,
         ran = arrived.ran,
         sourceAt = arrived.sourceAt,
     })
