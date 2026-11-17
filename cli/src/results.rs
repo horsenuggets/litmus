@@ -28,6 +28,13 @@ pub struct SpecResult {
 pub struct Run {
     pub specs: Vec<SpecResult>,
     pub appendix: Option<String>,
+    pub failure: Option<String>,
+}
+
+impl Run {
+    pub fn passed(&self) -> bool {
+        self.failure.is_none() && Tally::of(&self.specs).passed()
+    }
 }
 
 impl SpecResult {
@@ -107,6 +114,16 @@ mod tests {
             }
         );
         assert!(!tally.passed());
+    }
+
+    #[test]
+    fn a_run_its_adapter_failed_does_not_pass_whatever_its_tests_did() {
+        let specs = r#"[{ "path": ["a"], "tests": [{ "name": "one", "groups": [] }] }]"#;
+        let run = |rest: &str| serde_json::from_str::<Run>(&format!(r#"{{ "specs": {specs}{rest} }}"#)).unwrap();
+
+        assert!(run("").passed());
+        assert!(run(r#", "appendix": "text""#).passed());
+        assert!(!run(r#", "failure": "too little ran""#).passed());
     }
 
     #[test]

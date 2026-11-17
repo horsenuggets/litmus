@@ -22,6 +22,8 @@ const LABEL_WIDTH: usize = "ERROR".len();
 
 const DETAIL_INDENT: &str = "     ";
 
+const REASON_INDENT: &str = "                ";
+
 /// The narrowest column worth wrapping a message into; with less room, the terminal is left to wrap it
 const MIN_MESSAGE_WIDTH: usize = 30;
 
@@ -100,6 +102,7 @@ pub fn render(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
     }
 
     lines.extend(summary(&Tally::of(results)));
+    lines.extend(run.failure.as_deref().map(failed).unwrap_or_default());
     lines.push(String::new());
 
     lines.join("\n")
@@ -161,6 +164,16 @@ fn summary(tally: &Tally) -> [String; 2] {
         format!(" {}  {specs}", paint(BOLD, "Specs")),
         format!(" {}  {tests}", paint(BOLD, "Tests")),
     ]
+}
+
+fn failed(reason: &str) -> Vec<String> {
+    let mut reason = reason.trim_end().lines();
+    let first = reason.next().unwrap_or_default();
+
+    let mut lines = vec![format!(" {}    {}: {first}", paint(BOLD, "Run"), paint(RED, "failed"))];
+    lines.extend(reason.map(|line| format!("{REASON_INDENT}{line}")));
+
+    lines
 }
 
 /// Why no place took the run: either none holds the project, or the ones that do are behind the disk
@@ -319,6 +332,7 @@ mod tests {
         Run {
             specs: serde_json::from_str(results).unwrap(),
             appendix: appendix.map(str::to_owned),
+            failure: None,
         }
     }
 
@@ -453,6 +467,28 @@ Coverage
 ";
 
         assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn says_why_the_adapter_failed_the_run_under_the_counts() {
+        let results = r#"[{ "path": ["ReplicatedStorage", "Good.spec"], "tests": [{ "name": "works", "groups": [] }] }]"#;
+        let mut run = run(results, Some("Coverage 4%"));
+        run.failure = Some("coverage is under the floor
+of 5%
+".to_owned());
+
+        let expected = "
+  PASS    tests/Good.spec.luau  1 test
+
+Coverage 4%
+
+ Specs  1 passed
+ Tests  1 passed
+ Run    failed: coverage is under the floor
+                of 5%
+";
+
+        assert_eq!(plain_run(&run, None), expected);
     }
 
     #[test]

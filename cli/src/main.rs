@@ -13,7 +13,7 @@ mod standalone;
 use config::Config;
 use manifest::Manifest;
 use report::Sources;
-use results::{Run, Tally};
+use results::Run;
 use selection::Selection;
 use serde_json::Value;
 use server::{Outcome, Server, Timeouts};
@@ -184,7 +184,7 @@ fn main() -> ExitCode {
     }
 }
 
-/// Whether every spec loaded and every test passed
+/// Whether every spec loaded, every test passed and the adapter failed nothing
 fn test(asked: &Test) -> Result<bool, String> {
     let project_dir = Path::new(".");
 
@@ -211,7 +211,7 @@ fn test(asked: &Test) -> Result<bool, String> {
 
     anstream::print!("{}", report::render(&run, &ran.sources, columns));
 
-    Ok(Tally::of(&run.specs).passed())
+    Ok(run.passed())
 }
 
 fn run_standalone(project_dir: &Path, flags: &[String], selection: &Selection) -> Result<Ran, String> {
