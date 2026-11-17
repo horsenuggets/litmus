@@ -1,3 +1,9 @@
 [cloud]
 universe = 10756976039
 place = 109535589334533
+
+[command]
+run = ["lune", "run"]
+lib = "lib"
+specs = ["tests"]
+adapter = ".lune/link/Adapter.luau"

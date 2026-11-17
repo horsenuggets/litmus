@@ -112,6 +112,31 @@ function roblox.findSpecs(roots: { Instance }): { ModuleScript }
     return specs
 end
 
+function roblox.adapter(session: any, specs: { ModuleScript }): any
+    local listed: { any } = {}
+    for _, spec in specs do
+        table.insert(listed, {
+            path = roblox.path(spec),
+            load = function(): ()
+                session:execute(spec)
+            end,
+        })
+    end
+
+    return {
+        specs = listed,
+
+        locate = function(chunk: string): { string }?
+            local module: ModuleScript? = session:named(chunk)
+            return if module then roblox.path(module) else nil
+        end,
+
+        spawn = function(run: (() -> ()) | thread): ()
+            task.spawn(run)
+        end,
+    }
+end
+
 -- The way in: a script outside the lib loads this module alone, then hands it the lib to run through
 function roblox.run(lib: ModuleScript, roots: { Instance }): any
     local loaderModule: Instance? = lib:FindFirstChild("Loader")
@@ -122,30 +147,9 @@ function roblox.run(lib: ModuleScript, roots: { Instance }): any
     local loader: any = roblox.load(loaderModule, {})()
     local session: any = loader.new(roblox)
 
-    local specs: { any } = {}
-    for _, spec in roblox.findSpecs(roots) do
-        table.insert(specs, {
-            path = roblox.path(spec),
-            load = function(): ()
-                session:execute(spec)
-            end,
-        })
-    end
-
     local litmus: any = session:require(lib)
 
-    return litmus.run({
-        specs = specs,
-
-        locate = function(chunk: string): { string }?
-            local module: ModuleScript? = session:named(chunk)
-            return if module then roblox.path(module) else nil
-        end,
-
-        spawn = function(run: (() -> ()) | thread): ()
-            task.spawn(run)
-        end,
-    })
+    return litmus.run(roblox.adapter(session, roblox.findSpecs(roots)))
 end
 
 return roblox
