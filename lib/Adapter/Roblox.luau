@@ -44,15 +44,15 @@ local function addIfSpec(specs: { ModuleScript }, instance: Instance): ()
     end
 end
 
-local external = {}
+local roblox = {}
 
 -- What a module's chunk runs under, and so what errors and tracebacks call it
-function external.name(module: ModuleScript): string
+function roblox.name(module: ModuleScript): string
     return module:GetFullName()
 end
 
 -- The names leading to a module from the top of the place, kept apart since a name can hold dots of its own
-function external.path(module: ModuleScript): { string }
+function roblox.path(module: ModuleScript): { string }
     local names: { string } = {}
     local current: Instance? = module
 
@@ -64,7 +64,7 @@ function external.path(module: ModuleScript): { string }
     return names
 end
 
-function external.resolve(from: ModuleScript, target: unknown): ModuleScript
+function roblox.resolve(from: ModuleScript, target: unknown): ModuleScript
     local found: Instance? = nil
     if typeof(target) == "Instance" then
         found = target
@@ -79,9 +79,9 @@ function external.resolve(from: ModuleScript, target: unknown): ModuleScript
     return found
 end
 
-function external.load(module: ModuleScript, globals: { [string]: any }): (...any) -> ...any
+function roblox.load(module: ModuleScript, globals: { [string]: any }): (...any) -> ...any
     -- The "=" makes errors and tracebacks print the name bare, as they do for a real script
-    local chunk: ((...any) -> ...any)?, problem: string? = loadstring(module.Source, `={external.name(module)}`)
+    local chunk: ((...any) -> ...any)?, problem: string? = loadstring(module.Source, `={roblox.name(module)}`)
     if not chunk then
         error(problem, 0)
     end
@@ -94,7 +94,7 @@ function external.load(module: ModuleScript, globals: { [string]: any }): (...an
     return chunk
 end
 
-function external.findSpecs(roots: { Instance }): { ModuleScript }
+function roblox.findSpecs(roots: { Instance }): { ModuleScript }
     local specs: { ModuleScript } = {}
 
     for _, root in roots do
@@ -112,22 +112,40 @@ function external.findSpecs(roots: { Instance }): { ModuleScript }
     return specs
 end
 
-function external.spawn(run: (() -> ()) | thread): ()
-    task.spawn(run)
-end
-
 -- The way in: a script outside the lib loads this module alone, then hands it the lib to run through
-function external.run(lib: ModuleScript, roots: { Instance }): any
+function roblox.run(lib: ModuleScript, roots: { Instance }): any
     local loaderModule: Instance? = lib:FindFirstChild("Loader")
     if not loaderModule or not loaderModule:IsA("ModuleScript") then
         error(`[Litmus]: {lib:GetFullName()} has no Loader module`, 0)
     end
 
-    local loader: any = external.load(loaderModule, {})()
-    local session: any = loader.new(external)
+    local loader: any = roblox.load(loaderModule, {})()
+    local session: any = loader.new(roblox)
+
+    local specs: { any } = {}
+    for _, spec in roblox.findSpecs(roots) do
+        table.insert(specs, {
+            path = roblox.path(spec),
+            load = function(): ()
+                session:execute(spec)
+            end,
+        })
+    end
 
     local litmus: any = session:require(lib)
-    return litmus.run(session, roots)
+
+    return litmus.run({
+        specs = specs,
+
+        locate = function(chunk: string): { string }?
+            local module: ModuleScript? = session:named(chunk)
+            return if module then roblox.path(module) else nil
+        end,
+
+        spawn = function(run: (() -> ()) | thread): ()
+            task.spawn(run)
+        end,
+    })
 end
 
-return external
+return roblox

@@ -3,15 +3,12 @@
 -- A host's own handle for a module; `any` so each host can type it as what it really is
 export type Module = any
 
--- What the lib needs from the platform it runs on; External is the implementation
+-- What the loader needs from the platform it runs on; an adapter that loads through it is the implementation
 export type Host = {
     -- What `load` runs the module's chunk under
     name: (module: Module) -> string,
-    path: (module: Module) -> { string },
     resolve: (from: Module, target: unknown) -> Module,
     load: (module: Module, globals: { [string]: any }) -> (...any) -> ...any,
-    findSpecs: (roots: { any }) -> { Module },
-    spawn: (run: (() -> ()) | thread) -> (),
 }
 
 -- Boxed because a module can return nil

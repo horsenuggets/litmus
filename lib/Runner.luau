@@ -1,9 +1,5 @@
 local collector = require("./Collector")
 local failure = require("./Failure")
-local loader = require("./Loader")
-
--- Annotated so analysis fails here if External stops providing what Host asks for
-local external: loader.Host = require("./External")
 
 export type Failure = {
     message: string,
@@ -28,19 +24,28 @@ export type SpecResult = {
     failure: Failure?,
 }
 
--- A failure knows its script only by the name the chunk ran under, which the session turns back into the script
-local function report(session: loader.Class, caught: failure.Failure?): Failure?
+export type Spec = {
+    path: { string },
+    load: () -> (),
+}
+
+export type Adapter = {
+    specs: { Spec },
+    locate: (chunk: string) -> { string }?,
+    spawn: (run: (() -> ()) | thread) -> (),
+}
+
+-- A failure knows its script only by the name the chunk ran under, which the adapter turns back into the script
+local function report(adapter: Adapter, caught: failure.Failure?): Failure?
     if not caught then
         return nil
     end
 
-    local module: loader.Module? = session:named(caught.source)
-
     return {
         message = caught.message,
 
-        -- A chunk the session never ran has nothing but that name to go by
-        source = if module ~= nil then external.path(module) else { caught.source },
+        -- A chunk the adapter can't place has nothing but that name to go by
+        source = adapter.locate(caught.source) or { caught.source },
         line = caught.line,
         trace = caught.trace,
     }
@@ -51,15 +56,15 @@ type Running = {
     waiter: thread?,
 }
 
-local function start(running: Running, body: () -> ()): ()
+local function start(adapter: Adapter, running: Running, body: () -> ()): ()
     running.count += 1
 
-    external.spawn(function(): ()
+    adapter.spawn(function(): ()
         body()
         running.count -= 1
 
         if running.count == 0 and running.waiter then
-            external.spawn(running.waiter)
+            adapter.spawn(running.waiter)
         end
     end)
 end
@@ -71,12 +76,10 @@ local function waitFor(running: Running): ()
     end
 end
 
-local function runSpec(session: loader.Class, spec: loader.Module, running: Running): SpecResult
+local function runSpec(adapter: Adapter, spec: Spec, running: Running): SpecResult
     collector.begin()
 
-    local problem: failure.Failure? = failure.catch(function(): ()
-        session:execute(spec)
-    end)
+    local problem: failure.Failure? = failure.catch(spec.load)
 
     local tests: { collector.Test } = collector.finish()
     local results: { TestResult } = {}
@@ -86,28 +89,28 @@ local function runSpec(session: loader.Class, spec: loader.Module, running: Runn
             local result: TestResult = { name = test.name, groups = test.groups }
             table.insert(results, result)
 
-            start(running, function(): ()
-                result.failure = report(session, failure.catch(test.run))
+            start(adapter, running, function(): ()
+                result.failure = report(adapter, failure.catch(test.run))
             end)
         end
     end
 
     return {
-        path = external.path(spec),
+        path = spec.path,
         tests = results,
-        failure = report(session, problem),
+        failure = report(adapter, problem),
     }
 end
 
 local runner = {}
 
--- `session` must be the one this lib was loaded through, or specs register with another copy
-function runner.run(session: loader.Class, roots: { any }): { SpecResult }
+-- The adapter's specs must require this copy of the lib, or they register with another
+function runner.run(adapter: Adapter): { SpecResult }
     local results: { SpecResult } = {}
     local running: Running = { count = 0, waiter = nil }
 
-    for _, spec in external.findSpecs(roots) do
-        table.insert(results, runSpec(session, spec, running))
+    for _, spec in adapter.specs do
+        table.insert(results, runSpec(adapter, spec, running))
     end
 
     waitFor(running)

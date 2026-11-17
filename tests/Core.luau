@@ -148,7 +148,7 @@ end
 
 spec.Name ..= ".spec"
 
-local entry = lib.External
+local entry = lib.Adapter.Roblox
 
 -- Loaded straight from its source, so Studio's require cache stays out of it
 local chunk: ((...any) -> ...any)?, problem: string? = loadstring(entry.Source, `={entry:GetFullName()}`)

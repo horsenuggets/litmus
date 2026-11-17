@@ -27,7 +27,7 @@ function anchor.run(folder: string, name: string): litmus.SpecResult
 
     spec.Name ..= SPEC_SUFFIX
 
-    local entry = lib.External
+    local entry = lib.Adapter.Roblox
 
     -- A second copy of the lib, so the run this is called from keeps its own tests
     local chunk: ((...any) -> ...any)?, problem: string? = loadstring(entry.Source, `={entry:GetFullName()}`)

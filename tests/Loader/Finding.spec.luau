@@ -1,4 +1,4 @@
-local external = require("../../Litmus/External")
+local roblox = require("../../Litmus/Adapter/Roblox")
 local litmus = require("../../Litmus")
 
 local expect = litmus.expect
@@ -29,27 +29,27 @@ group("findSpecs", function(): ()
         moduleIn(root, "Thing")
         folderIn(root, "Folder.spec")
 
-        expect.same(external.findSpecs({ root }), { spec })
+        expect.same(roblox.findSpecs({ root }), { spec })
     end)
 
     test("looks all the way down a root", function(): ()
         local root: Folder = folderIn(nil, "Root")
         local spec: ModuleScript = moduleIn(folderIn(folderIn(root, "Outer"), "Inner"), "Thing.spec")
 
-        expect.same(external.findSpecs({ root }), { spec })
+        expect.same(roblox.findSpecs({ root }), { spec })
     end)
 
     test("takes a root that is itself a spec", function(): ()
         local spec: ModuleScript = moduleIn(nil, "Thing.spec")
 
-        expect.same(external.findSpecs({ spec }), { spec })
+        expect.same(roblox.findSpecs({ spec }), { spec })
     end)
 
     test("takes a spec once when two roots hold it", function(): ()
         local root: Folder = folderIn(nil, "Root")
         local spec: ModuleScript = moduleIn(root, "Thing.spec")
 
-        expect.same(external.findSpecs({ root, spec, root }), { spec })
+        expect.same(roblox.findSpecs({ root, spec, root }), { spec })
     end)
 
     test("lists specs in the order of their full names", function(): ()
@@ -57,24 +57,24 @@ group("findSpecs", function(): ()
         local second: ModuleScript = moduleIn(root, "Second.spec")
         local first: ModuleScript = moduleIn(root, "First.spec")
 
-        expect.same(external.findSpecs({ root }), { first, second })
+        expect.same(roblox.findSpecs({ root }), { first, second })
     end)
 end)
 
 group("path", function(): ()
     test("lists the names leading to a module, without the DataModel", function(): ()
-        expect.same(external.path(script), { "ReplicatedStorage", "Tests", "Loader", "Finding.spec" })
+        expect.same(roblox.path(script), { "ReplicatedStorage", "Tests", "Loader", "Finding.spec" })
     end)
 
     test("starts from the top of a tree outside the place", function(): ()
         local module: ModuleScript = moduleIn(folderIn(folderIn(nil, "Outer"), "Inner"), "Thing")
 
-        expect.same(external.path(module), { "Outer", "Inner", "Thing" })
+        expect.same(roblox.path(module), { "Outer", "Inner", "Thing" })
     end)
 
     test("keeps a name with dots in it whole", function(): ()
         local module: ModuleScript = moduleIn(folderIn(nil, "v1.2"), "Thing.spec")
 
-        expect.same(external.path(module), { "v1.2", "Thing.spec" })
+        expect.same(roblox.path(module), { "v1.2", "Thing.spec" })
     end)
 end)

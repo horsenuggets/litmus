@@ -31,10 +31,19 @@ local function moduleIn(parent: Instance, name: string): ModuleScript
     return found
 end
 
+local function folderIn(parent: Instance, name: string): Instance
+    local found: Instance? = parent:FindFirstChild(name)
+    if not found then
+        error(`[Litmus]: {parent:GetFullName()} has nothing named {name}`, 0)
+    end
+
+    return found
+end
+
 -- Goes through the place's own copy of the lib, so the specs and the runner share one
 local function runThroughLib(roots: { Instance }): { outcome.SpecResult }
     local lib: ModuleScript = moduleIn(replicatedStorage, LIB_NAME)
-    local entry: ModuleScript = moduleIn(lib, "External")
+    local entry: ModuleScript = moduleIn(folderIn(lib, "Adapter"), "Roblox")
 
     -- Loaded straight from its source, so Studio's require cache stays out of it
     local chunk: ((...any) -> ...any)?, problem: string? = loadstring(entry.Source, `={entry:GetFullName()}`)
