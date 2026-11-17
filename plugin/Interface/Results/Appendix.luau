@@ -10,7 +10,7 @@ local wrappedText = require("../Components/WrappedText")
 
 export type Props = {
     appendix: outcome.Appendix,
-    opened: { [string]: boolean },
+    openRows: { [string]: boolean },
 
     layoutOrder: number?,
 }
@@ -163,7 +163,7 @@ local function appendix(scope: flux.Scope, props: Props): Frame
                 widths = widths,
 
                 path = `{position}/{cells.nameOf(row, index)}`,
-                opened = props.opened,
+                openRows = props.openRows,
             }))
         end
 

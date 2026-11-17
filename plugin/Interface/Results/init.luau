@@ -32,7 +32,7 @@ local function results(scope: flux.Scope, props: Props): Frame
 
     local picked: flux.Value<outcome.Status?> = scope:value(nil :: outcome.Status?)
 
-    local opened: { [string]: boolean } = {}
+    local openRows: { [string]: boolean } = {}
 
     -- A pick only holds while some spec has that outcome, so new results can't leave the list empty
     local selected: flux.Computed<outcome.Status?> = scope:computed(function(use: flux.Use): outcome.Status?
@@ -96,8 +96,8 @@ local function results(scope: flux.Scope, props: Props): Frame
                 },
             },
 
-            content = function(opened: flux.Scope): { Instance }
-                return rowsOf(opened, passed, root)
+            content = function(inner: flux.Scope): { Instance }
+                return rowsOf(inner, passed, root)
             end,
         })
     end
@@ -197,7 +197,7 @@ local function results(scope: flux.Scope, props: Props): Frame
                         layoutOrder = #ran.specs + 2,
 
                         appendix = ran.appendix,
-                        opened = opened,
+                        openRows = openRows,
                     }))
                 end
 

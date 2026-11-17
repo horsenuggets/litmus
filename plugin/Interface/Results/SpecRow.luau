@@ -81,30 +81,30 @@ local function specRow(scope: flux.Scope, props: Props): Frame
         },
 
         content = if hasDetails
-            then function(opened: flux.Scope): { Instance }
+            then function(inner: flux.Scope): { Instance }
                 local built: { Instance } = {}
 
                 if specFailure then
                     -- Padded as the rows around it are, so the box starts under the spec's icon
-                    table.insert(built, opened:element "Frame" {
+                    table.insert(built, inner:element "Frame" {
                         Name = "Failure",
                         LayoutOrder = 1,
 
                         AutomaticSize = Enum.AutomaticSize.Y,
                         Size = UDim2.fromScale(1, 0),
 
-                        opened:element "UIPadding" {
+                        inner:element "UIPadding" {
                             PaddingLeft = UDim.new(0, theme.rowPadding),
                             PaddingRight = UDim.new(0, theme.rowPadding),
                             PaddingBottom = UDim.new(0, FAILURE_BOTTOM),
                         },
 
-                        failureBox(opened, { failure = specFailure, color = style.color }),
+                        failureBox(inner, { failure = specFailure, color = style.color }),
                     })
                 end
 
                 if #spec.tests > 0 then
-                    table.insert(built, testList(opened, {
+                    table.insert(built, testList(inner, {
                         layoutOrder = 2,
                         tests = spec.tests,
                     }))

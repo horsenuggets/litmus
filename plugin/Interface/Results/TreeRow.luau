@@ -12,7 +12,7 @@ export type Props = {
     widths: { number },
 
     path: string,
-    opened: { [string]: boolean },
+    openRows: { [string]: boolean },
 
     layoutOrder: number?,
 }
@@ -64,8 +64,8 @@ local treeRow: (scope: flux.Scope, props: Props) -> Frame
 
 function treeRow(scope: flux.Scope, props: Props): Frame
     local row: outcome.Row = props.row
-    local opened: { [string]: boolean } = props.opened
-    local remembered: boolean? = opened[props.path]
+    local openRows: { [string]: boolean } = props.openRows
+    local remembered: boolean? = openRows[props.path]
 
     local head: { Instance } = {}
     for column, cell in row.cells do
@@ -83,7 +83,7 @@ function treeRow(scope: flux.Scope, props: Props): Frame
         startsOpen = if remembered ~= nil then remembered else row.open,
 
         toggled = function(open: boolean): ()
-            opened[props.path] = open
+            openRows[props.path] = open
         end,
 
         head = head,
@@ -100,7 +100,7 @@ function treeRow(scope: flux.Scope, props: Props): Frame
                         widths = props.widths,
 
                         path = `{props.path}/{cells.nameOf(child, position)}`,
-                        opened = opened,
+                        openRows = openRows,
                     })
                 end
 

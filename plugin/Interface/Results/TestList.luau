@@ -51,36 +51,36 @@ local function testList(scope: flux.Scope, props: Props): Frame
                 continue
             end
 
-            local inner: testTree.Group = entry.group
+            local nested: testTree.Group = entry.group
 
             built[index] = collapsible(building, {
                 layoutOrder = index,
 
                 height = GROUP_HEIGHT,
-                startsOpen = allPassed or inner.failed > 0,
+                startsOpen = allPassed or nested.failed > 0,
 
                 head = {
                     label(building, {
                         layoutOrder = 1,
 
-                        text = inner.name,
+                        text = nested.name,
                         font = theme.boldFont,
                         size = theme.bodyTextSize,
-                        color = if inner.failed > 0 then colors.brightText else colors.text,
+                        color = if nested.failed > 0 then colors.brightText else colors.text,
                     }),
 
                     label(building, {
                         layoutOrder = 2,
 
-                        text = words.testNote(inner.total, inner.failed),
+                        text = words.testNote(nested.total, nested.failed),
                         font = theme.mainFont,
                         size = theme.smallTextSize,
                         color = colors.subText,
                     }),
                 },
 
-                content = function(opened: flux.Scope): { Instance }
-                    return entriesOf(opened, inner)
+                content = function(inner: flux.Scope): { Instance }
+                    return entriesOf(inner, nested)
                 end,
             })
         end
