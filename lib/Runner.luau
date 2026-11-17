@@ -41,6 +41,15 @@ export type Run = {
     appendix: string?,
 }
 
+export type Progress =
+    { kind: "loading", spec: number }
+    | { kind: "loaded", spec: number, tests: number }
+    | { kind: "tested", spec: number, failed: boolean }
+    | { kind: "finished", spec: number }
+    | { kind: "settled" }
+
+type Tell = (event: Progress) -> ()
+
 -- A failure knows its script only by the name the chunk ran under, which the adapter turns back into the script
 local function report(adapter: Adapter, caught: failure.Failure?): Failure?
     if not caught then
@@ -90,8 +99,9 @@ local function waitFor(running: Running): ()
     end
 end
 
-local function runSpec(adapter: Adapter, spec: Spec, running: Running): SpecResult
+local function runSpec(adapter: Adapter, spec: Spec, index: number, running: Running, tell: Tell): SpecResult
     collector.begin()
+    tell({ kind = "loading", spec = index })
 
     local problem: Failure? = catch(adapter, spec.load)
 
@@ -101,15 +111,24 @@ local function runSpec(adapter: Adapter, spec: Spec, running: Running): SpecResu
     local unfinished: number = #tests
 
     local afterResults: { TestResult } = {}
-    for index, step in collected.afters do
-        afterResults[index] = { name = step.name, groups = step.groups }
+    for position, step in collected.afters do
+        afterResults[position] = { name = step.name, groups = step.groups }
     end
+
+    tell({ kind = "loaded", spec = index, tests = if problem then 0 else #tests + #afterResults })
 
     local function runAfters(): ()
         start(adapter, running, function(): ()
-            for index, step in collected.afters do
-                afterResults[index].failure = catch(adapter, step.run)
+            for position, step in collected.afters do
+                local failure: Failure? = catch(adapter, step.run)
+                afterResults[position].failure = failure
+
+                if not problem then
+                    tell({ kind = "tested", spec = index, failed = failure ~= nil })
+                end
             end
+
+            tell({ kind = "finished", spec = index })
         end)
     end
 
@@ -119,6 +138,7 @@ local function runSpec(adapter: Adapter, spec: Spec, running: Running): SpecResu
 
         start(adapter, running, function(): ()
             result.failure = catch(adapter, test.run)
+            tell({ kind = "tested", spec = index, failed = result.failure ~= nil })
 
             unfinished -= 1
             if unfinished == 0 then
@@ -145,15 +165,22 @@ end
 local runner = {}
 
 -- The adapter's specs must require this copy of the lib, or they register with another
-function runner.run(adapter: Adapter): Run
+function runner.run(adapter: Adapter, observe: Tell?): Run
     local results: { SpecResult } = {}
     local running: Running = { count = 0, waiter = nil }
 
-    for _, spec in adapter.specs do
-        table.insert(results, runSpec(adapter, spec, running))
+    local function tell(event: Progress): ()
+        if observe then
+            observe(event)
+        end
+    end
+
+    for index, spec in adapter.specs do
+        table.insert(results, runSpec(adapter, spec, index, running, tell))
     end
 
     waitFor(running)
+    tell({ kind = "settled" })
 
     local describe: ((specs: { SpecResult }) -> string?)? = adapter.results
 

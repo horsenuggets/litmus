@@ -8,6 +8,7 @@ export type SpecResult = runner.SpecResult
 export type Spec = runner.Spec
 export type Adapter = runner.Adapter
 export type Run = runner.Run
+export type Progress = runner.Progress
 
 local litmus = {
     test = collector.test,
