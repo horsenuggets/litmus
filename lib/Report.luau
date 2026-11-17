@@ -56,6 +56,8 @@ export type RowOptions = {
 local TONES: { [string]: true } = { good = true, plain = true, dim = true }
 local ALIGNS: { [string]: true } = { left = true, right = true }
 
+local MAX_PARTS: number = 10
+
 local function refuse(piece: string, problem: string): never
     error(`[Litmus]: report.{piece} {problem}`, 3)
 end
@@ -138,8 +140,8 @@ function report.part(value: number, tone: Tone): Part
 end
 
 function report.meter(parts: { Part }): Meter
-    if not isList(parts) then
-        refuse("meter", "takes a list of parts, each made with report.part")
+    if not isList(parts) or #parts > MAX_PARTS then
+        refuse("meter", `takes a list of up to {MAX_PARTS} parts, each made with report.part`)
     end
 
     for index, part in parts do

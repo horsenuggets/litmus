@@ -99,6 +99,10 @@ group("refusals", function(): ()
             report.meter({ 1 :: any })
         end
 
+        local function meterOfTooMany(): ()
+            report.meter(table.create(11, report.part(1, "good")))
+        end
+
         local function cellToTheMiddle(): ()
             report.cell("name", { align = "middle" :: any })
         end
@@ -116,6 +120,7 @@ group("refusals", function(): ()
         expect.error(partBelowZero, "report.part takes its value as a number of zero or more, and got -1")
         expect.error(partOfNoTone, "a tone of good, plain or dim, and got loud")
         expect.error(meterOfNumbers, "part 1 isn't one")
+        expect.error(meterOfTooMany, "report.meter takes a list of up to 10 parts")
         expect.error(cellToTheMiddle, "an align of left or right, and got middle")
         expect.error(rowOfNumbers, "cell 1 isn't")
         expect.error(treeOfText, "row 1 isn't one")
