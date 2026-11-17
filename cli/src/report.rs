@@ -16,7 +16,7 @@ pub const GREEN: Style = AnsiColor::Green.on_default();
 pub const RED: Style = AnsiColor::Red.on_default();
 const ORANGE: Style = Style::new().fg_color(Some(ORANGE_COLOR));
 pub const BOLD: Style = Style::new().bold();
-const DIM: Style = Style::new().dimmed();
+pub const DIM: Style = Style::new().dimmed();
 
 /// The longest label a badge holds, so that spec names start in one column whatever the badge says
 const LABEL_WIDTH: usize = "ERROR".len();
