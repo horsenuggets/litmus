@@ -3,7 +3,7 @@ local outcome = require("../Outcome")
 local paths = {}
 
 -- A path as Studio writes a full name, which is also how an error message names its script
-function paths.shown(path: outcome.Path): string
+function paths.fullName(path: outcome.Path): string
     return table.concat(path, ".")
 end
 

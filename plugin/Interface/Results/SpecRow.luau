@@ -64,7 +64,7 @@ local function specRow(scope: flux.Scope, props: Props): Frame
                 layoutOrder = 3,
                 truncated = true,
 
-                text = paths.shown(paths.relativeTo(paths.parent(spec.path), props.root)),
+                text = paths.fullName(paths.relativeTo(paths.parent(spec.path), props.root)),
                 font = theme.mainFont,
                 size = theme.smallTextSize,
                 color = colors.subText,

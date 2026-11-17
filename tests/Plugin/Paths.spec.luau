@@ -6,13 +6,13 @@ local expect = litmus.expect
 local group = litmus.group
 local test = litmus.test
 
-group("shown", function(): ()
+group("fullName", function(): ()
     test("joins the names with dots", function(): ()
-        expect.equal(paths.shown({ "Place", "Tests", "Thing.spec" }), "Place.Tests.Thing.spec")
+        expect.equal(paths.fullName({ "Place", "Tests", "Thing.spec" }), "Place.Tests.Thing.spec")
     end)
 
     test("shows nothing for no names", function(): ()
-        expect.equal(paths.shown({}), "")
+        expect.equal(paths.fullName({}), "")
     end)
 end)
 

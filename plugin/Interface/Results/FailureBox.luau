@@ -27,7 +27,7 @@ local CODE_CORNER: UDim = UDim.new(0, 3)
 local function tidy(failure: outcome.Failure): string
     local message: string = failure.message
 
-    local position: string = `{paths.shown(failure.source)}:{failure.line}: `
+    local position: string = `{paths.fullName(failure.source)}:{failure.line}: `
     if string.sub(message, 1, #position) == position then
         message = string.sub(message, #position + 1)
     end
@@ -164,7 +164,7 @@ local function failureBox(scope: flux.Scope, props: Props): Frame
             wrappedText(scope, {
                 layoutOrder = 3,
 
-                text = `{paths.shown(failure.source)}:{failure.line}`,
+                text = `{paths.fullName(failure.source)}:{failure.line}`,
                 font = theme.mainFont,
                 size = theme.smallTextSize,
                 color = colors.subText,
