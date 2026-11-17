@@ -119,7 +119,7 @@ local SAMPLE_RESULTS: { outcome.SpecResult } = {
         },
     },
     {
-        path = inTests("Loader", "Requires.spec"),
+        path = inTests("Roblox", "Requires.spec"),
         tests = {
             { name = "requires a sibling with ./", groups = {} },
             { name = "requires a child with @self", groups = {} },

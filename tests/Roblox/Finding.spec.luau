@@ -63,7 +63,7 @@ end)
 
 group("path", function(): ()
     test("lists the names leading to a module, without the DataModel", function(): ()
-        expect.same(roblox.path(script), { "ReplicatedStorage", "Tests", "Loader", "Finding.spec" })
+        expect.same(roblox.path(script), { "ReplicatedStorage", "Tests", "Roblox", "Finding.spec" })
     end)
 
     test("starts from the top of a tree outside the place", function(): ()
