@@ -11,6 +11,10 @@ function words.untagged(message: string): string
     return message
 end
 
+function words.plain(text: string): string
+    return (string.gsub(text, "\27%[[%d;]*m", ""))
+end
+
 function words.plural(count: number, noun: string): string
     return `{count} {noun}{if count == 1 then "" else "s"}`
 end

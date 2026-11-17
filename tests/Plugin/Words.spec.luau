@@ -19,6 +19,16 @@ group("untagged", function(): ()
     end)
 end)
 
+group("plain", function(): ()
+    test("takes the colour codes a terminal reads out of a text", function(): ()
+        expect.equal(words.plain("\27[1mCoverage\27[0m  \27[32m5%\27[0m"), "Coverage  5%")
+    end)
+
+    test("leaves a text without any alone", function(): ()
+        expect.equal(words.plain("5% of [2] lines"), "5% of [2] lines")
+    end)
+end)
+
 group("plural", function(): ()
     test("leaves one of a thing as it is", function(): ()
         expect.equal(words.plural(1, "test"), "1 test")
