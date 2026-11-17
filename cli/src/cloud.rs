@@ -3,7 +3,7 @@ mod place;
 
 use crate::luau;
 use crate::manifest::Manifest;
-use client::{Client, Progress};
+use client::{Client, TaskState};
 use serde::Deserialize;
 use serde_json::Value;
 use std::env;
@@ -86,12 +86,12 @@ fn wait(client: &Client, task: &str) -> Result<Vec<Value>, String> {
 
     loop {
         match client.progress(task)? {
-            Progress::Complete(returned) => return Ok(returned),
-            Progress::Failed(reason) => return Err(format!("the task failed: {reason}")),
-            Progress::Running if Instant::now() >= deadline => {
+            TaskState::Complete(returned) => return Ok(returned),
+            TaskState::Failed(reason) => return Err(format!("the task failed: {reason}")),
+            TaskState::Running if Instant::now() >= deadline => {
                 return Err("the task never finished".to_owned());
             }
-            Progress::Running => thread::sleep(POLL),
+            TaskState::Running => thread::sleep(POLL),
         }
     }
 }

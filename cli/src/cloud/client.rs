@@ -16,7 +16,7 @@ const PERMISSIONS_HINT: &str =
     "does the key have universe-places and luau-execution-sessions Write on this experience?";
 
 #[derive(Debug, PartialEq)]
-pub enum Progress {
+pub enum TaskState {
     Running,
 
     /// With what the task's script returned
@@ -57,16 +57,16 @@ struct Problem {
 }
 
 impl Task {
-    fn progress(self) -> Progress {
+    fn progress(self) -> TaskState {
         match self.state.as_str() {
-            "COMPLETE" => Progress::Complete(self.output.map(|output| output.results).unwrap_or_default()),
-            "FAILED" => Progress::Failed(match self.error {
+            "COMPLETE" => TaskState::Complete(self.output.map(|output| output.results).unwrap_or_default()),
+            "FAILED" => TaskState::Failed(match self.error {
                 Some(problem) if !problem.message.is_empty() => problem.message,
                 Some(problem) if !problem.code.is_empty() => problem.code,
                 _ => "Open Cloud gave no reason".to_owned(),
             }),
-            "CANCELLED" => Progress::Failed("it was cancelled".to_owned()),
-            _ => Progress::Running,
+            "CANCELLED" => TaskState::Failed("it was cancelled".to_owned()),
+            _ => TaskState::Running,
         }
     }
 }
@@ -134,7 +134,7 @@ impl Client {
         Ok(started.path)
     }
 
-    pub fn progress(&self, task: &str) -> Result<Progress, String> {
+    pub fn progress(&self, task: &str) -> Result<TaskState, String> {
         let url = format!("{}/cloud/v2/{task}", self.origin);
         let response = self.agent.get(&url).header(KEY_HEADER, &self.key).call();
 
@@ -228,7 +228,7 @@ mod tests {
             .map(|header| header.value.as_str().to_owned())
     }
 
-    fn progress(task: &'static str) -> Progress {
+    fn progress(task: &'static str) -> TaskState {
         let (client, handle) = fake(200, task);
         let progress = client.progress("universes/11/tasks/abc").unwrap();
         handle.join().unwrap();
@@ -266,26 +266,26 @@ mod tests {
     fn asks_after_a_task_by_its_path() {
         let (client, handle) = fake(200, r#"{ "state": "PROCESSING" }"#);
 
-        assert_eq!(client.progress("universes/11/tasks/abc"), Ok(Progress::Running));
+        assert_eq!(client.progress("universes/11/tasks/abc"), Ok(TaskState::Running));
         assert_eq!(handle.join().unwrap(), asked("GET", "/cloud/v2/universes/11/tasks/abc", b""));
     }
 
     #[test]
     fn reads_how_a_task_ended() {
-        assert_eq!(progress(r#"{ "state": "QUEUED" }"#), Progress::Running);
+        assert_eq!(progress(r#"{ "state": "QUEUED" }"#), TaskState::Running);
         assert_eq!(
             progress(r#"{ "state": "COMPLETE", "output": { "results": ["[]"] } }"#),
-            Progress::Complete(vec![json!("[]")])
+            TaskState::Complete(vec![json!("[]")])
         );
         assert_eq!(
             progress(r#"{ "state": "FAILED", "error": { "code": "SCRIPT_ERROR", "message": "boom" } }"#),
-            Progress::Failed("boom".to_owned())
+            TaskState::Failed("boom".to_owned())
         );
         assert_eq!(
             progress(r#"{ "state": "FAILED", "error": { "code": "DEADLINE_EXCEEDED" } }"#),
-            Progress::Failed("DEADLINE_EXCEEDED".to_owned())
+            TaskState::Failed("DEADLINE_EXCEEDED".to_owned())
         );
-        assert_eq!(progress(r#"{ "state": "CANCELLED" }"#), Progress::Failed("it was cancelled".to_owned()));
+        assert_eq!(progress(r#"{ "state": "CANCELLED" }"#), TaskState::Failed("it was cancelled".to_owned()));
     }
 
     #[test]
