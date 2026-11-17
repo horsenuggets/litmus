@@ -123,7 +123,7 @@ test("reports that every test is done before the adapter gives its results", fun
     local order: { string } = {}
 
     local adapter: litmus.Adapter = adapterFor({})
-    adapter.results = function(_: { litmus.SpecResult }): string?
+    adapter.results = function(_: { litmus.SpecResult }): litmus.Remarks?
         table.insert(order, "results")
         return nil
     end

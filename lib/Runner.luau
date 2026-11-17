@@ -33,12 +33,18 @@ export type Adapter = {
     specs: { Spec },
     locate: (chunk: string) -> { string }?,
     spawn: (run: (() -> ()) | thread) -> (),
-    results: ((specs: { SpecResult }) -> string?)?,
+    results: ((specs: { SpecResult }) -> Remarks?)?,
+}
+
+export type Remarks = {
+    appendix: string?,
+    failure: string?,
 }
 
 export type Run = {
     specs: { SpecResult },
     appendix: string?,
+    failure: string?,
 }
 
 export type Progress =
@@ -162,6 +168,21 @@ local function runSpec(adapter: Adapter, spec: Spec, index: number, running: Run
     }
 end
 
+local function remarksOf(adapter: Adapter, results: { SpecResult }): Remarks
+    local describe: ((specs: { SpecResult }) -> Remarks?)? = adapter.results
+    local remarks: unknown = if describe then describe(results) else nil
+
+    if remarks == nil then
+        return {}
+    end
+
+    if type(remarks) ~= "table" then
+        error(`[Litmus]: the adapter's results returned a {type(remarks)}; they return a table, with any text to print as its appendix`, 0)
+    end
+
+    return remarks :: any
+end
+
 local runner = {}
 
 -- The adapter's specs must require this copy of the lib, or they register with another
@@ -182,11 +203,12 @@ function runner.run(adapter: Adapter, observe: Tell?): Run
     waitFor(running)
     tell({ kind = "settled" })
 
-    local describe: ((specs: { SpecResult }) -> string?)? = adapter.results
+    local remarks: Remarks = remarksOf(adapter, results)
 
     return {
         specs = results,
-        appendix = if describe then describe(results) else nil,
+        appendix = remarks.appendix,
+        failure = remarks.failure,
     }
 end
 
