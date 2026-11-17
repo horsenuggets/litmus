@@ -27,11 +27,11 @@ local THROWER: outcome.Path = inTests("Utils", "Thrower")
 -- One of each thing the results window has to show, in the shape the lib returns
 local SAMPLE_RESULTS: { outcome.SpecResult } = {
     {
-        path = inTests("Interface", "Empty.spec"),
+        path = inTests("Lib", "Empty.spec"),
         tests = {},
     },
     {
-        path = inTests("Interface", "Expect.spec"),
+        path = inTests("Lib", "Expect.spec"),
         tests = {
             { name = "passes on equal values", groups = { "equal" } },
             {
@@ -48,7 +48,7 @@ local SAMPLE_RESULTS: { outcome.SpecResult } = {
         },
     },
     {
-        path = inTests("Interface", "Failures.spec"),
+        path = inTests("Lib", "Failures.spec"),
         tests = {
             {
                 name = "reports every line of a message",
@@ -83,7 +83,7 @@ local SAMPLE_RESULTS: { outcome.SpecResult } = {
         },
     },
     {
-        path = inTests("Interface", "Groups.spec"),
+        path = inTests("Lib", "Groups.spec"),
         tests = {
             { name = "sits outside every group", groups = {} },
             { name = "sits in one group", groups = { "outer" } },
@@ -93,7 +93,7 @@ local SAMPLE_RESULTS: { outcome.SpecResult } = {
         },
     },
     {
-        path = inTests("Interface", "Single.spec"),
+        path = inTests("Lib", "Single.spec"),
         tests = {
             { name = "stands alone", groups = {} },
         },
