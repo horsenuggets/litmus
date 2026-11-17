@@ -139,11 +139,12 @@ local function load(lib: string, module: string, globals: { [string]: any }): (.
         return loadedByRuntime(own)
     end
 
-    local compiled: boolean, chunk: any = pcall(luau.load, fs.readFile(module), {
+    local loadOptions: luau.LoadOptions = {
         debugName = `={module}`,
         environment = globals,
-    })
+    }
 
+    local compiled: boolean, chunk: any = pcall(luau.load, fs.readFile(module), loadOptions)
     if not compiled then
         error(compileProblem(chunk), 0)
     end
