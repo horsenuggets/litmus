@@ -12,8 +12,6 @@ export type Props = {
 
     -- The outcome's colour, which marks the line the failure points at
     color: flux.UsedAs<Color3>,
-
-    layoutOrder: number?,
 }
 
 local STROKE: number = 1
@@ -99,7 +97,6 @@ local function failureBox(scope: flux.Scope, props: Props): Frame
 
     return scope:element "Frame" {
         Name = "Failure",
-        LayoutOrder = props.layoutOrder,
 
         AnchorPoint = Vector2.zero,
         Position = UDim2.new(),
