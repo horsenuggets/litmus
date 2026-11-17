@@ -3,6 +3,7 @@ mod config;
 mod luau;
 mod manifest;
 mod plugin;
+mod progress;
 mod report;
 mod results;
 mod server;

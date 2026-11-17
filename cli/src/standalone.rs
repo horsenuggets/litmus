@@ -1,4 +1,5 @@
 use crate::luau;
+use crate::progress::{Display, Event};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -6,21 +7,30 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const HARNESS: &str = include_str!("standalone/harness.luau");
 
 const FOLDER: &str = ".litmus";
 const SCRIPT: &str = "run.luau";
 const MARKER: &str = "@@litmus-run@@";
+const PROGRESS_MARKER: &str = "@@litmus-progress@@";
 const BUDGET: Duration = Duration::from_secs(300);
+const TICK: Duration = Duration::from_millis(100);
 
 const SPEC_ENDINGS: [&str; 2] = [".spec.luau", ".spec.lua"];
 const MODULE_ENDINGS: [&str; 2] = [".luau", ".lua"];
 const SHIPPED_ADAPTER: &str = "Adapter/Lune";
 const OWN_OPTIONS: [&str; 5] = ["plugin", "cloud", "standalone", "help", "version"];
+
+#[derive(Debug, PartialEq)]
+enum Message {
+    Printed(String),
+    Event(Event),
+    Reported(String),
+}
 
 #[derive(Deserialize, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -76,7 +86,7 @@ pub fn run(project_dir: &Path, runtime: &Runtime, flags: &[String]) -> Result<Va
         .and_then(|()| fs::write(folder.join(SCRIPT), script))
         .map_err(|error| format!("couldn't write {FOLDER}/{SCRIPT}: {error}"))?;
 
-    let reported = execute(project_dir, &runtime.run)?;
+    let reported = execute(project_dir, &runtime.run, &specs)?;
 
     serde_json::from_str(&reported).map_err(|error| format!("couldn't read what the run reported: {error}"))
 }
@@ -160,6 +170,7 @@ fn harness(runtime: &Runtime, specs: &[String], flags: &[String]) -> Result<Stri
         format!("local adapter = require({})", luau::string(&from_folder(&adapter))),
         String::new(),
         format!("local marker = {}", luau::string(MARKER)),
+        format!("local progressMarker = {}", luau::string(PROGRESS_MARKER)),
         String::new(),
         "local options = {".to_owned(),
         format!("    lib = {},", luau::string(&lib)),
@@ -194,7 +205,7 @@ fn from_folder(path: &str) -> String {
     format!("../{path}")
 }
 
-fn execute(project_dir: &Path, run: &[String]) -> Result<String, String> {
+fn execute(project_dir: &Path, run: &[String], specs: &[String]) -> Result<String, String> {
     let script = format!("{FOLDER}/{SCRIPT}");
     let shown = format!("{} {script}", run.join(" "));
 
@@ -214,16 +225,33 @@ fn execute(project_dir: &Path, run: &[String]) -> Result<String, String> {
     };
 
     let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let _ = sender.send(relay(BufReader::new(output), |line| println!("{line}")));
-    });
+    thread::spawn(move || relay(BufReader::new(output), |message| sender.send(message).is_ok()));
 
-    let Ok(reported) = receiver.recv_timeout(BUDGET) else {
-        let _ = child.kill();
-        let _ = child.wait();
+    let deadline = Instant::now() + BUDGET;
+    let mut display = Display::new(specs.to_vec());
 
-        return Err(format!("`{shown}` was stopped, still running after {} minutes", BUDGET.as_secs() / 60));
+    let reported = loop {
+        match receiver.recv_timeout(TICK) {
+            Ok(Message::Printed(line)) => display.print(&line),
+            Ok(Message::Event(event)) => display.take(event),
+            Ok(Message::Reported(results)) => break Some(results),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break None,
+        }
+
+        if Instant::now() >= deadline {
+            display.finish();
+
+            let _ = child.kill();
+            let _ = child.wait();
+
+            return Err(format!("`{shown}` was stopped, still running after {} minutes", BUDGET.as_secs() / 60));
+        }
+
+        display.refresh();
     };
+
+    display.finish();
 
     let Some(reported) = reported else {
         let status = child
@@ -239,22 +267,31 @@ fn execute(project_dir: &Path, run: &[String]) -> Result<String, String> {
     Ok(reported)
 }
 
-fn relay(mut output: impl BufRead, mut pass: impl FnMut(&str)) -> Option<String> {
+fn relay(mut output: impl BufRead, mut pass: impl FnMut(Message) -> bool) {
     let mut line = Vec::new();
 
     while output.read_until(b'\n', &mut line).is_ok_and(|read| read > 0) {
         let text = String::from_utf8_lossy(&line);
-        let text = text.trim_end_matches(['\n', '\r']);
+        let message = read(text.trim_end_matches(['\n', '\r']));
+        let last = matches!(message, Some(Message::Reported(_)));
 
-        if let Some(results) = text.strip_prefix(MARKER) {
-            return Some(results.to_owned());
+        if message.is_some_and(|message| !pass(message)) || last {
+            return;
         }
 
-        pass(text);
         line.clear();
     }
+}
 
-    None
+fn read(text: &str) -> Option<Message> {
+    if let Some(results) = text.strip_prefix(MARKER) {
+        return Some(Message::Reported(results.to_owned()));
+    }
+
+    match text.strip_prefix(PROGRESS_MARKER) {
+        Some(event) => serde_json::from_str(event).ok().map(Message::Event),
+        None => Some(Message::Printed(text.to_owned())),
+    }
 }
 
 #[cfg(test)]
@@ -352,6 +389,7 @@ mod tests {
 local adapter = require("../submodules/litmus/lib/Adapter/Lune")
 
 local marker = "@@litmus-run@@"
+local progressMarker = "@@litmus-progress@@"
 
 local options = {
     lib = "submodules/litmus/lib",
@@ -369,7 +407,7 @@ local options = {
 "#;
 
         assert!(script.starts_with(header), "{script}");
-        assert!(script.ends_with("print(marker .. encode(litmus.run(adapter(options))))\n"), "{script}");
+        assert!(script.ends_with("print(marker .. encode(litmus.run(adapter(options), report)))\n"), "{script}");
     }
 
     #[test]
@@ -440,27 +478,65 @@ local options = {
         assert!(problem.contains("--verbose"), "{problem}");
     }
 
-    #[test]
-    fn passes_lines_on_until_the_marked_one_and_reads_no_further() {
-        let output = "first\r\nsecond\n@@litmus-run@@{\"specs\":[]}\nlast";
+    fn relayed(output: &str) -> Vec<Message> {
         let mut passed = Vec::new();
 
-        let reported = relay(Cursor::new(output), |line| passed.push(line.to_owned()));
+        relay(Cursor::new(output), |message| {
+            passed.push(message);
+            true
+        });
 
-        assert_eq!(reported, Some("{\"specs\":[]}".to_owned()));
-        assert_eq!(passed, ["first", "second"]);
+        passed
+    }
+
+    fn printed(line: &str) -> Message {
+        Message::Printed(line.to_owned())
+    }
+
+    #[test]
+    fn passes_lines_on_until_the_results_and_reads_no_further() {
+        let passed = relayed("first\r\nsecond\n@@litmus-run@@{\"specs\":[]}\nlast");
+
+        assert_eq!(
+            passed,
+            [printed("first"), printed("second"), Message::Reported("{\"specs\":[]}".to_owned())]
+        );
+    }
+
+    #[test]
+    fn tells_a_line_of_progress_from_one_a_spec_printed() {
+        let passed = relayed("@@litmus-progress@@{\"kind\":\"settled\"}\nprinted\n");
+
+        assert_eq!(passed, [Message::Event(Event::Settled), printed("printed")]);
+    }
+
+    #[test]
+    fn drops_a_line_of_progress_it_cannot_read() {
+        assert_eq!(relayed("@@litmus-progress@@{\"kind\":\"unheard-of\"}\nprinted\n"), [printed("printed")]);
     }
 
     #[test]
     fn a_run_that_printed_no_marked_line_reported_nothing() {
-        assert_eq!(relay(Cursor::new("only a print\n"), |_| ()), None);
-        assert_eq!(relay(Cursor::new(""), |_| ()), None);
+        assert_eq!(relayed("only a print\n"), [printed("only a print")]);
+        assert_eq!(relayed(""), []);
+    }
+
+    #[test]
+    fn stops_reading_once_nobody_takes_what_it_passes_on() {
+        let mut passed = 0;
+
+        relay(Cursor::new("first\nsecond\n"), |_| {
+            passed += 1;
+            false
+        });
+
+        assert_eq!(passed, 1);
     }
 
     #[test]
     fn a_command_that_cannot_start_is_named() {
         let run = ["litmus-no-such-command".to_owned(), "run".to_owned()];
-        let problem = execute(Path::new("."), &run).unwrap_err();
+        let problem = execute(Path::new("."), &run, &[]).unwrap_err();
 
         assert!(problem.contains("`litmus-no-such-command run .litmus/run.luau`"), "{problem}");
     }

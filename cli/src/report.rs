@@ -11,10 +11,10 @@ const ORANGE_COLOR: Color = Color::Rgb(RgbColor(255, 176, 66));
 const PASS_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::Green));
 const FAIL_BADGE: Style = badge(AnsiColor::BrightWhite, Color::Ansi(AnsiColor::Red));
 const ERROR_BADGE: Style = badge(AnsiColor::Black, ORANGE_COLOR);
-const GREEN: Style = AnsiColor::Green.on_default();
-const RED: Style = AnsiColor::Red.on_default();
+pub const GREEN: Style = AnsiColor::Green.on_default();
+pub const RED: Style = AnsiColor::Red.on_default();
 const ORANGE: Style = Style::new().fg_color(Some(ORANGE_COLOR));
-const BOLD: Style = Style::new().bold();
+pub const BOLD: Style = Style::new().bold();
 const DIM: Style = Style::new().dimmed();
 
 /// The longest label a badge holds, so that spec names start in one column whatever the badge says
@@ -135,7 +135,7 @@ fn spec_lines(spec: &SpecResult, sources: &Sources, name_width: usize, columns: 
     lines
 }
 
-fn headline(style: Style, label: &str, name: &str, width: usize, note: &str) -> String {
+pub fn headline(style: Style, label: &str, name: &str, width: usize, note: &str) -> String {
     let badge = paint(style, &format!(" {label} "));
     let gap = " ".repeat(LABEL_WIDTH - label.len());
 
@@ -255,7 +255,7 @@ fn tidy<'a>(failure: &'a Failure, sources: &Sources) -> &'a str {
 }
 
 /// Leaves out whatever there is none of, but always says something
-fn counts(parts: &[(usize, &str, Style)]) -> String {
+pub fn counts(parts: &[(usize, &str, Style)]) -> String {
     let shown: Vec<String> = parts
         .iter()
         .filter(|(count, _, _)| *count > 0)
@@ -273,14 +273,14 @@ fn plural(count: usize, noun: &str) -> String {
     format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 
-const fn badge(text: AnsiColor, background: Color) -> Style {
+pub const fn badge(text: AnsiColor, background: Color) -> Style {
     Style::new()
         .fg_color(Some(Color::Ansi(text)))
         .bg_color(Some(background))
         .bold()
 }
 
-fn paint(style: Style, text: &str) -> String {
+pub fn paint(style: Style, text: &str) -> String {
     format!("{style}{text}{style:#}")
 }
 
