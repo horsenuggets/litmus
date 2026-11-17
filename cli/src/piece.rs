@@ -137,35 +137,35 @@ fn legend(items: &[Key]) -> String {
     format!("{ROW_INDENT}{}", keys.join(KEY_GAP))
 }
 
-struct Shown<'a> {
+struct VisibleRow<'a> {
     depth: usize,
     row: &'a Row,
 }
 
-fn shown<'a>(rows: &'a [Row], depth: usize, list: &mut Vec<Shown<'a>>) {
+fn flatten<'a>(rows: &'a [Row], depth: usize, list: &mut Vec<VisibleRow<'a>>) {
     for row in rows {
-        list.push(Shown { depth, row });
+        list.push(VisibleRow { depth, row });
 
         if row.open {
-            shown(&row.rows, depth + 1, list);
+            flatten(&row.rows, depth + 1, list);
         }
     }
 }
 
 fn tree(rows: &[Row]) -> Vec<String> {
     let mut list = Vec::new();
-    shown(rows, 0, &mut list);
+    flatten(rows, 0, &mut list);
 
-    let columns = list.iter().map(|shown| shown.row.cells.len()).max().unwrap_or(0);
+    let columns = list.iter().map(|visible| visible.row.cells.len()).max().unwrap_or(0);
 
     let widths: Vec<usize> = (0..columns)
-        .map(|column| list.iter().filter_map(|shown| shown.width(column)).max().unwrap_or(0))
+        .map(|column| list.iter().filter_map(|visible| visible.width(column)).max().unwrap_or(0))
         .collect();
 
-    list.iter().map(|shown| shown.line(&widths)).collect()
+    list.iter().map(|visible| visible.line(&widths)).collect()
 }
 
-impl Shown<'_> {
+impl VisibleRow<'_> {
     fn indent(&self, column: usize) -> String {
         if column == 0 { LEVEL_INDENT.repeat(self.depth) } else { String::new() }
     }
