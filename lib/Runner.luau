@@ -95,18 +95,44 @@ local function runSpec(adapter: Adapter, spec: Spec, running: Running): SpecResu
 
     local problem: Failure? = catch(adapter, spec.load)
 
-    local tests: { collector.Test } = collector.finish()
+    local collected: collector.Collected = collector.finish()
+    local tests: { collector.Test } = if problem then {} else collected.tests
     local results: { TestResult } = {}
+    local unfinished: number = #tests
+
+    local afterResults: { TestResult } = {}
+    for index, step in collected.afters do
+        afterResults[index] = { name = step.name, groups = step.groups }
+    end
+
+    local function runAfters(): ()
+        start(adapter, running, function(): ()
+            for index, step in collected.afters do
+                afterResults[index].failure = catch(adapter, step.run)
+            end
+        end)
+    end
+
+    for _, test in tests do
+        local result: TestResult = { name = test.name, groups = test.groups }
+        table.insert(results, result)
+
+        start(adapter, running, function(): ()
+            result.failure = catch(adapter, test.run)
+
+            unfinished -= 1
+            if unfinished == 0 then
+                runAfters()
+            end
+        end)
+    end
+
+    if #tests == 0 then
+        runAfters()
+    end
 
     if not problem then
-        for _, test in tests do
-            local result: TestResult = { name = test.name, groups = test.groups }
-            table.insert(results, result)
-
-            start(adapter, running, function(): ()
-                result.failure = catch(adapter, test.run)
-            end)
-        end
+        table.move(afterResults, 1, #afterResults, #results + 1, results)
     end
 
     return {

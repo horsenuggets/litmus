@@ -4,8 +4,13 @@ export type Test = {
     run: () -> (),
 }
 
+export type Collected = {
+    tests: { Test },
+    afters: { Test },
+}
+
 -- Set only while a spec loads, so a call at any other time fails instead of vanishing
-local collecting: { Test }? = nil
+local collecting: Collected? = nil
 local groups: { string } = {}
 
 local collector = {}
@@ -15,7 +20,7 @@ function collector.test(name: string, run: () -> ()): ()
         error("[Litmus]: test called outside a spec", 2)
     end
 
-    table.insert(collecting, { name = name, groups = table.clone(groups), run = run })
+    table.insert(collecting.tests, { name = name, groups = table.clone(groups), run = run })
 end
 
 function collector.group(name: string, body: () -> ()): ()
@@ -28,19 +33,31 @@ function collector.group(name: string, body: () -> ()): ()
     table.remove(groups)
 end
 
+function collector.after(name: string, run: () -> ()): ()
+    if not collecting then
+        error("[Litmus]: after called outside a spec", 2)
+    end
+
+    if #groups > 0 then
+        error("[Litmus]: after called inside a group; it covers the whole spec", 2)
+    end
+
+    table.insert(collecting.afters, { name = name, groups = {}, run = run })
+end
+
 function collector.begin(): ()
-    collecting = {}
+    collecting = { tests = {}, afters = {} }
     groups = {}
 end
 
-function collector.finish(): { Test }
-    local tests: { Test }? = collecting
-    if not tests then
+function collector.finish(): Collected
+    local collected: Collected? = collecting
+    if not collected then
         error("[Litmus]: finish called without begin")
     end
 
     collecting = nil
-    return tests
+    return collected
 end
 
 return collector

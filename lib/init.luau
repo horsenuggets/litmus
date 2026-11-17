@@ -12,6 +12,7 @@ export type Run = runner.Run
 local litmus = {
     test = collector.test,
     group = collector.group,
+    after = collector.after,
     expect = expect,
 
     run = runner.run,
