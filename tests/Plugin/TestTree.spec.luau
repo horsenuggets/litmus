@@ -20,9 +20,9 @@ local function outline(group: testTree.Group): { any }
     local lines: { any } = {}
 
     for index, entry in group.entries do
-        if entry.test then
+        if entry.kind == "test" then
             lines[index] = entry.test.name
-        elseif entry.group then
+        else
             lines[index] = { group = entry.group.name, entries = outline(entry.group) }
         end
     end

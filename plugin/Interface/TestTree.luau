@@ -1,10 +1,7 @@
 local outcome = require("../Outcome")
 
--- A test or a group among the tests, in the order the spec registered them; one holds exactly one of the two
-export type Entry = {
-    test: outcome.TestResult?,
-    group: Group?,
-}
+-- A test or a group among the tests, in the order the spec registered them
+export type Entry = { kind: "test", test: outcome.TestResult } | { kind: "group", group: Group }
 
 export type Group = {
     name: string,
@@ -32,7 +29,9 @@ local function testTree(tests: { outcome.TestResult }): Group
 
             if not existing then
                 current.byName[name] = group
-                table.insert(current.entries, { group = group })
+
+                local entry: Entry = { kind = "group", group = group }
+                table.insert(current.entries, entry)
             end
 
             group.total += 1
@@ -43,7 +42,8 @@ local function testTree(tests: { outcome.TestResult }): Group
             current = group
         end
 
-        table.insert(current.entries, { test = test })
+        local entry: Entry = { kind = "test", test = test }
+        table.insert(current.entries, entry)
     end
 
     return root

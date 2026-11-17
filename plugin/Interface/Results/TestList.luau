@@ -46,15 +46,12 @@ local function testList(scope: flux.Scope, props: Props): Frame
         local built: { Instance } = {}
 
         for index, entry in group.entries do
-            local inner: testTree.Group? = entry.group
-
-            if entry.test then
+            if entry.kind == "test" then
                 built[index] = testLine(building, entry.test, index)
-            end
-
-            if not inner then
                 continue
             end
+
+            local inner: testTree.Group = entry.group
 
             built[index] = collapsible(building, {
                 layoutOrder = index,
