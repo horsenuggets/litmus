@@ -1,3 +1,4 @@
+use crate::selection::Selection;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -76,9 +77,35 @@ impl Manifest {
     pub fn specs(&self) -> Vec<&InstancePath> {
         self.scripts
             .iter()
+            .filter(|script| script.is_spec())
             .map(|script| &script.path)
-            .filter(|path| path.last().is_some_and(|name| name.ends_with(SPEC_SUFFIX)))
             .collect()
+    }
+
+    pub fn narrow(&mut self, selection: &Selection) -> Result<(), String> {
+        let specs: Vec<String> = self
+            .scripts
+            .iter()
+            .filter(|script| script.is_spec())
+            .map(Script::file_from_project)
+            .collect();
+
+        let kept = selection.narrow(specs)?;
+
+        self.scripts
+            .retain(|script| !script.is_spec() || kept.contains(&script.file_from_project()));
+
+        Ok(())
+    }
+}
+
+impl Script {
+    fn is_spec(&self) -> bool {
+        self.path.last().is_some_and(|name| name.ends_with(SPEC_SUFFIX))
+    }
+
+    fn file_from_project(&self) -> String {
+        self.file.to_string_lossy().replace('\\', "/")
     }
 }
 
@@ -171,6 +198,24 @@ mod tests {
         assert_eq!(manifest.project, "demo");
         assert_eq!(paths, ["ReplicatedStorage/Thing", "ReplicatedStorage/Thing.spec"]);
         assert_eq!(manifest.specs(), [&manifest.scripts[1].path]);
+    }
+
+    #[test]
+    fn narrows_to_the_specs_a_selection_names_and_keeps_every_other_script() {
+        let dir = project("narrows");
+        let mut manifest = Manifest::from_sourcemap(SOURCEMAP.as_bytes(), &dir).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+
+        let nowhere = Selection::of(&["Other.spec.luau".to_owned()]).unwrap();
+        assert!(manifest.narrow(&nowhere).is_err());
+        assert_eq!(manifest.scripts.len(), 2);
+
+        let helper = Selection::of(&["Thing.luau".to_owned()]).unwrap();
+        assert!(manifest.narrow(&helper).is_err());
+
+        manifest.narrow(&Selection::of(&["Thing.spec.luau".to_owned()]).unwrap()).unwrap();
+        assert_eq!(manifest.scripts.len(), 2);
+        assert_eq!(manifest.specs().len(), 1);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use crate::luau;
 use crate::progress::{Display, Event};
+use crate::selection::Selection;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -69,15 +70,17 @@ impl Runtime {
     }
 }
 
-pub fn run(project_dir: &Path, runtime: &Runtime, flags: &[String]) -> Result<Value, String> {
+pub fn run(project_dir: &Path, runtime: &Runtime, flags: &[String], selection: &Selection) -> Result<Value, String> {
     if let Some(flag) = flags.iter().find(|flag| !runtime.flags.contains(flag)) {
         return Err(format!("--{flag} isn't a flag litmus.toml lists under [standalone]"));
     }
 
-    let specs = find_specs(project_dir, &runtime.specs)?;
-    if specs.is_empty() {
+    let found = find_specs(project_dir, &runtime.specs)?;
+    if found.is_empty() {
         return Err("the project has no .spec files where litmus.toml says to look".to_owned());
     }
+
+    let specs = selection.narrow(found)?;
 
     let folder = project_dir.join(FOLDER);
     let script = harness(runtime, &specs, flags)?;
@@ -99,7 +102,7 @@ fn is_flag(flag: &str) -> bool {
     spelled && !flag.is_empty() && !flag.starts_with('-') && !OWN_OPTIONS.contains(&flag)
 }
 
-fn relative(path: &str) -> Result<String, String> {
+pub fn relative(path: &str) -> Result<String, String> {
     if path.starts_with(['/', '\\']) || path.contains(':') {
         return Err(format!("\"{path}\" has to be a path from the project's folder"));
     }
@@ -473,7 +476,8 @@ local options = {
 
     #[test]
     fn refuses_a_flag_the_project_never_listed() {
-        let problem = run(Path::new("a folder that doesn't exist"), &runtime(), &["verbose".to_owned()]).unwrap_err();
+        let problem = run(Path::new("a folder that doesn't exist"), &runtime(), &["verbose".to_owned()], &Selection::default())
+            .unwrap_err();
 
         assert!(problem.contains("--verbose"), "{problem}");
     }
@@ -550,7 +554,7 @@ local options = {
             ..runtime()
         };
 
-        let reported = run(&dir, &runtime, &[]);
+        let reported = run(&dir, &runtime, &[], &Selection::default());
         let written = fs::read_to_string(dir.join(".litmus/run.luau"));
         fs::remove_dir_all(&dir).unwrap();
 
@@ -572,7 +576,7 @@ local options = {
         };
 
         let started = std::time::Instant::now();
-        let reported = run(&dir, &runtime, &[]);
+        let reported = run(&dir, &runtime, &[], &Selection::default());
         fs::remove_dir_all(&dir).unwrap();
 
         assert_eq!(reported, Ok(serde_json::json!({ "specs": [] })));
@@ -588,7 +592,7 @@ local options = {
             ..runtime()
         };
 
-        let problem = run(&dir, &runtime, &[]).unwrap_err();
+        let problem = run(&dir, &runtime, &[], &Selection::default()).unwrap_err();
         fs::remove_dir_all(&dir).unwrap();
 
         assert!(problem.contains("without reporting any results"), "{problem}");
