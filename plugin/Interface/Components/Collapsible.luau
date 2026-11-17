@@ -11,8 +11,8 @@ export type Props = {
     startsOpen: boolean,
     toggled: ((open: boolean) -> ())?,
 
-    -- Set for content that starts at the row's own left edge, and not under whatever follows the arrow
-    flush: boolean?,
+    -- How far in the content starts; left out, it starts under whatever follows the arrow
+    indent: number?,
 
     -- Laid out in a row after the arrow
     head: any,
@@ -181,7 +181,7 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
                     measure,
 
                     inner:element "UIPadding" {
-                        PaddingLeft = UDim.new(0, if props.flush then 0 else CONTENT_INDENT),
+                        PaddingLeft = UDim.new(0, props.indent or CONTENT_INDENT),
                         PaddingTop = UDim.new(0, CONTENT_TOP),
                         PaddingBottom = UDim.new(0, CONTENT_BOTTOM),
                     },

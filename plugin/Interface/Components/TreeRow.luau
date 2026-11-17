@@ -18,6 +18,7 @@ export type Props = {
 }
 
 local HEIGHT: number = 24
+local INDENT: number = 10
 local CHARACTER_WIDTH: number = theme.smallTextSize * 0.6
 
 local function cellOf(scope: flux.Scope, cell: outcome.Cell, column: number, width: number): Instance?
@@ -78,6 +79,7 @@ function treeRow(scope: flux.Scope, props: Props): Frame
         layoutOrder = props.layoutOrder,
 
         height = HEIGHT,
+        indent = INDENT,
         startsOpen = if remembered ~= nil then remembered else row.open,
 
         toggled = function(open: boolean): ()

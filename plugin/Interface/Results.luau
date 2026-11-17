@@ -71,7 +71,7 @@ local function results(scope: flux.Scope, props: Props): Frame
             startsOpen = false,
 
             -- The specs behind the fold are the list's own rows, so they line up with the ones above it
-            flush = true,
+            indent = 0,
 
             head = {
                 label(building, {
