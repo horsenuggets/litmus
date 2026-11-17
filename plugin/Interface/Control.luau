@@ -82,9 +82,8 @@ local function control(scope: flux.Scope, props: Props): Frame
 
                     Size = UDim2.fromOffset(LOGO_SIZE, LOGO_SIZE),
 
-                    -- `icon` is drawn to show on a dark background, and `darkIcon` on a light one
                     Image = scope:computed(function(use: flux.Use): string
-                        return if use(colors.isDark) then imageIds.icon else imageIds.darkIcon
+                        return if use(colors.isDark) then imageIds.logoOnDark else imageIds.logoOnLight
                     end),
                 },
 

@@ -46,9 +46,8 @@ local controlWindowInfo: DockWidgetPluginGuiInfo = DockWidgetPluginGuiInfo.new(E
 -- Always starts shut, since it has nothing to show until a run happens
 local resultsWindowInfo: DockWidgetPluginGuiInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Float, false, true, 560, 640, 360, 300)
 
--- `icon` is drawn to show on a dark toolbar, and `darkIcon` on a light one
 local function themedIcon(): string
-    return if studio.Theme.Name == "Dark" then imageIds.icon else imageIds.darkIcon
+    return if studio.Theme.Name == "Dark" then imageIds.logoOnDark else imageIds.logoOnLight
 end
 
 local function window(id: string, title: string, info: DockWidgetPluginGuiInfo): DockWidgetPluginGui

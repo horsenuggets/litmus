@@ -3,7 +3,7 @@ return {
 	check = "rbxassetid://84722367041939",
 	chevron = "rbxassetid://111045460190258",
 	cross = "rbxassetid://77526647274375",
-	darkIcon = "rbxassetid://124081897922229",
-	icon = "rbxassetid://136016097533439",
+	logoOnDark = "rbxassetid://136016097533439",
+	logoOnLight = "rbxassetid://124081897922229",
 	warn = "rbxassetid://122959344594826",
 }
