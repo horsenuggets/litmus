@@ -9,6 +9,7 @@ export type Props = {
 
     height: number,
     startsOpen: boolean,
+    toggled: ((open: boolean) -> ())?,
 
     -- Set for content that starts at the row's own left edge, and not under whatever follows the arrow
     flush: boolean?,
@@ -89,6 +90,10 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
 
                     built:set(true)
                     open:set(not flux.peek(open))
+
+                    if props.toggled then
+                        props.toggled(flux.peek(open))
+                    end
                 end,
             }),
 
