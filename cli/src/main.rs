@@ -20,7 +20,6 @@ use results::Run;
 use selection::Selection;
 use serde::Deserialize;
 use serde_json::Value;
-use server::{Outcome, Server, Timeouts};
 use std::env;
 use std::io::{self, IsTerminal};
 use std::path::Path;
@@ -204,8 +203,9 @@ fn test(asked: &Test) -> Result<bool, String> {
     let selection = Selection::of(&asked.paths)?;
 
     let ran = match asked.backend {
+        Backend::Plugin => run_with_plugin(project_dir, &selection)?,
+        Backend::Cloud => run_in_cloud(project_dir, &selection)?,
         Backend::Standalone => run_standalone(project_dir, &asked.flags, &selection)?,
-        Backend::Plugin | Backend::Cloud => run_in_place(project_dir, &asked.backend, &selection)?,
     };
 
     let run = Run::deserialize(&ran.results)
@@ -232,46 +232,38 @@ fn run_standalone(project_dir: &Path, flags: &[String], selection: &Selection) -
     })
 }
 
-fn run_in_place(project_dir: &Path, backend: &Backend, selection: &Selection) -> Result<Ran, String> {
+fn run_with_plugin(project_dir: &Path, selection: &Selection) -> Result<Ran, String> {
     let config = Config::read(project_dir)?;
-    let rojo_project = config.rojo_project();
+    let manifest = manifest_of(project_dir, &config, selection)?;
 
-    let mut manifest = Manifest::read(project_dir, rojo_project.as_deref())?;
+    Ok(Ran {
+        results: plugin::run(&manifest)?,
+        sources: Sources::of(&manifest),
+    })
+}
+
+fn run_in_cloud(project_dir: &Path, selection: &Selection) -> Result<Ran, String> {
+    let config = Config::read(project_dir)?;
+    let manifest = manifest_of(project_dir, &config, selection)?;
+
+    let rojo_project = config.rojo_project();
+    let place = config.cloud()?;
+
+    Ok(Ran {
+        results: cloud::run(project_dir, &manifest, &place, rojo_project.as_deref())?,
+        sources: Sources::of(&manifest),
+    })
+}
+
+fn manifest_of(project_dir: &Path, config: &Config, selection: &Selection) -> Result<Manifest, String> {
+    let mut manifest = Manifest::read(project_dir, config.rojo_project().as_deref())?;
     if manifest.specs().is_empty() {
         return Err("the project has no .spec files".to_owned());
     }
 
     manifest.narrow(selection)?;
 
-    let results = match backend {
-        Backend::Cloud => {
-            let place = config.cloud()?;
-            cloud::run(project_dir, &manifest, &place, rojo_project.as_deref())?
-        }
-        _ => run_with_plugin(&manifest)?,
-    };
-
-    Ok(Ran {
-        results,
-        sources: Sources::of(&manifest),
-    })
-}
-
-/// The results as the lib wrote them, from whichever open place holds the project
-fn run_with_plugin(manifest: &Manifest) -> Result<Value, String> {
-    let server = Server::open()?;
-    eprintln!("litmus: waiting for Studio on port {}", server.port());
-
-    let outcome = server.serve(manifest, Timeouts::default(), |place| {
-        eprintln!("litmus: running in {place}");
-    })?;
-
-    match outcome {
-        Outcome::Results(results) => Ok(results),
-        Outcome::Failed { place, message } => Err(format!("{place} couldn't run the tests: {message}")),
-        Outcome::Abandoned { place } => Err(format!("{place} took the run and never reported back")),
-        Outcome::Unclaimed(mismatches) => Err(report::unclaimed(&mismatches)),
-    }
+    Ok(manifest)
 }
 
 #[cfg(test)]

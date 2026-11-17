@@ -1,7 +1,6 @@
 use crate::component;
 use crate::manifest::Manifest;
 use crate::results::{Appendix, Failure, Run, SpecResult, Tally};
-use crate::server::Mismatch;
 use crate::style::{BOLD, DIM, GREEN, ORANGE, ORANGE_COLOR, RED, badge, paint};
 use anstyle::{AnsiColor, Color, Style};
 use std::collections::HashMap;
@@ -23,9 +22,6 @@ const MIN_MESSAGE_WIDTH: usize = 30;
 
 /// The lib tags its own errors with this, which says nothing once the CLI is the one printing them
 const LIB_TAG: &str = "[Litmus]: ";
-
-/// How many of a stale place's files get named before the rest are only counted
-const MAX_LISTED: usize = 10;
 
 pub enum Sources {
     Place(HashMap<Vec<String>, PathBuf>),
@@ -172,36 +168,6 @@ fn failed(reason: &str) -> Vec<String> {
     lines.extend(reason.map(|line| format!("{REASON_INDENT}{line}")));
 
     lines
-}
-
-/// Why no place took the run: either none holds the project, or the ones that do are behind the disk
-pub fn unclaimed(mismatches: &[Mismatch]) -> String {
-    if mismatches.is_empty() {
-        return "no open place holds this project; open it in Studio and switch the Litmus plugin on".to_owned();
-    }
-
-    let mut lines = vec!["no open place matches the code on disk; is rojo serving?".to_owned()];
-
-    for mismatch in mismatches {
-        lines.push(format!(
-            "  {}: {} differ, {} missing",
-            mismatch.place,
-            mismatch.differing.len(),
-            mismatch.missing.len()
-        ));
-
-        let paths = mismatch.differing.iter().chain(&mismatch.missing);
-        for path in paths.clone().take(MAX_LISTED) {
-            lines.push(format!("    {}", path.join(".")));
-        }
-
-        let unlisted = paths.count().saturating_sub(MAX_LISTED);
-        if unlisted > 0 {
-            lines.push(format!("    and {unlisted} more"));
-        }
-    }
-
-    lines.join("\n")
 }
 
 /// `path:line: message`, the form a terminal turns into a link, with the message's further lines kept under its first
@@ -538,19 +504,5 @@ Coverage 4%
         let text = plain_at(results, Some(24 + 29));
 
         assert!(text.contains("src/Helper.luau:4: one two three four five six seven eight nine ten\n"), "{text}");
-    }
-
-    #[test]
-    fn names_the_files_a_stale_place_is_behind_on() {
-        let mismatches: Vec<Mismatch> = serde_json::from_str(
-            r#"[{ "place": "Stale", "missing": [["ReplicatedStorage", "Gone"]], "differing": [["ReplicatedStorage", "Thing.spec"]] }]"#,
-        )
-        .unwrap();
-
-        let text = unclaimed(&mismatches);
-
-        assert!(text.contains("  Stale: 1 differ, 1 missing\n"), "{text}");
-        assert!(text.contains("    ReplicatedStorage.Thing.spec\n    ReplicatedStorage.Gone"), "{text}");
-        assert!(unclaimed(&[]).contains("no open place holds this project"));
     }
 }
