@@ -36,7 +36,7 @@ export type Stat = {
     text: string,
 }
 
-export type Component =
+export type Piece =
     { kind: "heading", text: string }
     | { kind: "text", text: string }
     | { kind: "stats", items: { Stat } }
@@ -77,7 +77,7 @@ end
 
 local report = {}
 
-function report.heading(text: string): Component
+function report.heading(text: string): Piece
     if type(text) ~= "string" then
         refuse("heading", `takes its text as a string, and got a {type(text)}`)
     end
@@ -85,7 +85,7 @@ function report.heading(text: string): Component
     return { kind = "heading", text = text }
 end
 
-function report.text(text: string): Component
+function report.text(text: string): Piece
     if type(text) ~= "string" then
         refuse("text", `takes its text as a string, and got a {type(text)}`)
     end
@@ -93,7 +93,7 @@ function report.text(text: string): Component
     return { kind = "text", text = text }
 end
 
-function report.stats(entries: { { string } }): Component
+function report.stats(entries: { { string } }): Piece
     if not isList(entries) then
         refuse("stats", "takes a list of pairs, each a label and its text")
     end
@@ -110,7 +110,7 @@ function report.stats(entries: { { string } }): Component
     return { kind = "stats", items = items }
 end
 
-function report.legend(entries: { { string } }): Component
+function report.legend(entries: { { string } }): Piece
     if not isList(entries) then
         refuse("legend", "takes a list of pairs, each a label and its tone")
     end
@@ -195,7 +195,7 @@ function report.row(cells: { Cell }, options: RowOptions?): Row
     }
 end
 
-function report.tree(rows: { Row }): Component
+function report.tree(rows: { Row }): Piece
     if not isList(rows) then
         refuse("tree", "takes a list of rows, each made with report.row")
     end

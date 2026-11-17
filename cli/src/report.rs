@@ -1,5 +1,5 @@
-use crate::component;
 use crate::manifest::Manifest;
+use crate::piece;
 use crate::results::{Failure, Run, SpecResult, Tally};
 use crate::style::{BOLD, DIM, GREEN, ORANGE, ORANGE_COLOR, RED, badge, paint};
 use anstyle::{AnsiColor, Color, Style};
@@ -87,7 +87,7 @@ pub fn render(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
     }
 
     if let Some(appendix) = &run.appendix {
-        lines.extend(component::render(appendix));
+        lines.extend(piece::render(appendix));
         lines.push(String::new());
     }
 
@@ -249,8 +249,8 @@ fn plural(count: usize, noun: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::component::Component;
     use crate::manifest::Script;
+    use crate::piece::Piece;
 
     fn manifest() -> Manifest {
         let script = |name: &str, file: &str| Script {
@@ -281,7 +281,7 @@ mod tests {
     fn run(results: &str, appendix: Option<&str>) -> Run {
         Run {
             specs: serde_json::from_str(results).unwrap(),
-            appendix: appendix.map(|text| vec![Component::Text { text: text.to_owned() }]),
+            appendix: appendix.map(|text| vec![Piece::Text { text: text.to_owned() }]),
             failure: None,
         }
     }
@@ -442,7 +442,7 @@ Coverage 4%
     }
 
     #[test]
-    fn draws_the_components_an_adapter_added_where_its_text_would_go() {
+    fn draws_the_pieces_an_adapter_added_above_the_counts() {
         let mut run = run("[]", None);
         run.appendix = serde_json::from_str(r#"[{ "kind": "heading", "text": "Lines run" }]"#).unwrap();
 

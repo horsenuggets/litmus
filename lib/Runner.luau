@@ -38,13 +38,13 @@ export type Adapter = {
 }
 
 export type Remarks = {
-    appendix: { pieces.Component }?,
+    appendix: { pieces.Piece }?,
     failure: string?,
 }
 
 export type Run = {
     specs: { SpecResult },
-    appendix: { pieces.Component }?,
+    appendix: { pieces.Piece }?,
     failure: string?,
 }
 

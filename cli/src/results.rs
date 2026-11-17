@@ -1,5 +1,5 @@
-use crate::component::Component;
 use crate::manifest::InstancePath;
+use crate::piece::Piece;
 use serde::Deserialize;
 use std::collections::BTreeSet;
 
@@ -29,7 +29,7 @@ pub struct SpecResult {
 #[derive(Deserialize)]
 pub struct Run {
     pub specs: Vec<SpecResult>,
-    pub appendix: Option<Vec<Component>>,
+    pub appendix: Option<Vec<Piece>>,
     pub failure: Option<String>,
 }
 

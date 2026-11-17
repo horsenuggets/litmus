@@ -128,7 +128,7 @@ group("refusals", function(): ()
 end)
 
 test("a run carries the pieces an adapter gives as its appendix", function(): ()
-    local pieces: { litmus.Component } = { report.heading("Lines run"), report.tree({ report.row({ "Source" }) }) }
+    local pieces: { litmus.Piece } = { report.heading("Lines run"), report.tree({ report.row({ "Source" }) }) }
 
     expect.equal(litmus.run(adapterWith(pieces)).appendix, pieces)
 end)

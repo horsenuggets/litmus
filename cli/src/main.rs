@@ -1,8 +1,8 @@
 mod cloud;
-mod component;
 mod config;
 mod luau;
 mod manifest;
+mod piece;
 mod plugin;
 mod progress;
 mod report;

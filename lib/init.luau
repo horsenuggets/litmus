@@ -12,7 +12,7 @@ export type Remarks = runner.Remarks
 export type Run = runner.Run
 export type Progress = runner.Progress
 
-export type Component = report.Component
+export type Piece = report.Piece
 export type Row = report.Row
 export type Cell = report.Cell
 export type Meter = report.Meter

@@ -9,7 +9,7 @@ const KEY_GAP: &str = "   ";
 
 #[derive(Deserialize, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
-pub enum Component {
+pub enum Piece {
     Heading { text: String },
     Text { text: String },
     Stats { items: Vec<Stat> },
@@ -89,29 +89,29 @@ impl Tone {
     }
 }
 
-pub fn render(components: &[Component]) -> Vec<String> {
+pub fn render(pieces: &[Piece]) -> Vec<String> {
     let mut lines = Vec::new();
     let mut under_heading = false;
 
-    for component in components {
+    for piece in pieces {
         if !lines.is_empty() && !under_heading {
             lines.push(String::new());
         }
 
-        lines.extend(draw(component));
-        under_heading = matches!(component, Component::Heading { .. });
+        lines.extend(draw(piece));
+        under_heading = matches!(piece, Piece::Heading { .. });
     }
 
     lines
 }
 
-fn draw(component: &Component) -> Vec<String> {
-    match component {
-        Component::Heading { text } => vec![format!(" {}", paint(BOLD, text))],
-        Component::Text { text } => text.trim_end().lines().map(str::to_owned).collect(),
-        Component::Stats { items } => stats(items),
-        Component::Legend { items } => vec![legend(items)],
-        Component::Tree { rows } => tree(rows),
+fn draw(piece: &Piece) -> Vec<String> {
+    match piece {
+        Piece::Heading { text } => vec![format!(" {}", paint(BOLD, text))],
+        Piece::Text { text } => text.trim_end().lines().map(str::to_owned).collect(),
+        Piece::Stats { items } => stats(items),
+        Piece::Legend { items } => vec![legend(items)],
+        Piece::Tree { rows } => tree(rows),
     }
 }
 
@@ -258,10 +258,10 @@ fn bar(parts: &[Part]) -> String {
 mod tests {
     use super::*;
 
-    fn plain(components: &str) -> Vec<String> {
-        let components: Vec<Component> = serde_json::from_str(components).unwrap();
+    fn plain(pieces: &str) -> Vec<String> {
+        let pieces: Vec<Piece> = serde_json::from_str(pieces).unwrap();
 
-        render(&components)
+        render(&pieces)
             .iter()
             .map(|line| anstream::adapter::strip_str(line).to_string())
             .collect()
@@ -377,13 +377,13 @@ mod tests {
 
     #[test]
     fn paints_a_cell_and_each_part_of_a_meter_in_its_tone() {
-        let components: Vec<Component> = serde_json::from_str(&format!(
+        let pieces: Vec<Piece> = serde_json::from_str(&format!(
             r#"[{{ "kind": "tree", "rows": [{}] }}]"#,
             row(&[meter(&[(1, "good"), (1, "plain"), (1, "dim")]), right("9", "dim")], false, &[])
         ))
         .unwrap();
 
-        let line = &render(&components)[0];
+        let line = &render(&pieces)[0];
         let good = paint(GREEN, &"━".repeat(8));
         let dim = paint(DIM, &"·".repeat(8));
 
@@ -397,6 +397,6 @@ mod tests {
 
     #[test]
     fn refuses_a_kind_it_does_not_know() {
-        assert!(serde_json::from_str::<Vec<Component>>(r#"[{ "kind": "chart" }]"#).is_err());
+        assert!(serde_json::from_str::<Vec<Piece>>(r#"[{ "kind": "chart" }]"#).is_err());
     }
 }
