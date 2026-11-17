@@ -21,9 +21,43 @@ export type SpecResult = {
     failure: Failure?,
 }
 
+export type Tone = "good" | "plain" | "dim"
+
+export type Part = {
+    value: number,
+    tone: Tone,
+}
+
+export type Cell = string | { kind: "cell", text: string, align: "left" | "right", tone: Tone } | { kind: "meter", parts: { Part } }
+
+export type Row = {
+    cells: { Cell },
+    open: boolean,
+    rows: { Row },
+}
+
+export type Stat = {
+    label: string,
+    text: string,
+}
+
+export type Key = {
+    label: string,
+    tone: Tone,
+}
+
+export type Piece =
+    { kind: "heading", text: string }
+    | { kind: "text", text: string }
+    | { kind: "stats", items: { Stat } }
+    | { kind: "legend", items: { Key } }
+    | { kind: "tree", rows: { Row } }
+
+export type Appendix = string | { Piece }
+
 -- What came of a run: its results, or why there are none
 export type Run =
-    { kind: "results", results: { SpecResult }, appendix: string?, failure: string? }
+    { kind: "results", results: { SpecResult }, appendix: Appendix?, failure: string? }
     | { kind: "problem", message: string }
 
 export type Status = "PASS" | "FAIL" | "ERROR"

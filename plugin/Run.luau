@@ -18,7 +18,7 @@ local CODE_SERVICES: { string } = {
 
 type LibRun = {
     specs: { outcome.SpecResult },
-    appendix: string?,
+    appendix: outcome.Appendix?,
     failure: string?,
 }
 
