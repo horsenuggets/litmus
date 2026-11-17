@@ -1,5 +1,4 @@
 mod cloud;
-mod command;
 mod config;
 mod luau;
 mod manifest;
@@ -7,6 +6,7 @@ mod plugin;
 mod report;
 mod results;
 mod server;
+mod standalone;
 
 use config::Config;
 use manifest::Manifest;
@@ -33,17 +33,16 @@ Commands:
   plugin uninstall    Remove the Studio plugin
 
 Options for test:
-  --backend <name>    Where the tests run, when not in an open Studio place:
-                        cloud      Roblox's cloud, in the place litmus.toml names, which the project is built
-                                   into as a new unpublished version
-                        command    A runtime on this machine, started by the command litmus.toml gives
-                        plugin     An open Studio place, as without the option
-  --<flag>            A flag of the project's own for its adapter, with --backend command
+  --plugin            Run in an open Studio place, through the plugin, as without any of these three
+  --cloud             Run in Roblox's cloud, in the place litmus.toml names, which the project is built into as a
+                      new unpublished version
+  --standalone        Run in a runtime on this machine, started by the command litmus.toml gives
+  --<flag>            A flag of the project's own for its adapter, with --standalone
 
 litmus.toml:
   [cloud]             The experience and its place, as `universe` and `place`; and as `build`, a .rbxl to use as
                       the new version, when Rojo alone doesn't build the whole place
-  [command]           The command that runs a Luau file, as `run`; the folder of litmus's lib, as `lib`; where to
+  [standalone]        The command that runs a Luau file, as `run`; the folder of litmus's lib, as `lib`; where to
                       look for .spec files, as `specs`; and for a project with an adapter of its own, that file
                       as `adapter` and the flags it takes as `flags`
 
@@ -59,7 +58,7 @@ Options:
 enum Backend {
     Plugin,
     Cloud,
-    Command,
+    Standalone,
 }
 
 impl Backend {
@@ -67,7 +66,7 @@ impl Backend {
         match name {
             "plugin" => Some(Backend::Plugin),
             "cloud" => Some(Backend::Cloud),
-            "command" => Some(Backend::Command),
+            "standalone" => Some(Backend::Standalone),
             _ => None,
         }
     }
@@ -85,12 +84,14 @@ impl Test {
         let mut backend = None;
         let mut flags = Vec::new();
 
-        let mut options = options.iter();
-        while let Some(option) = options.next() {
-            match option.strip_prefix("--")? {
-                "backend" if backend.is_none() => backend = Some(Backend::named(options.next()?)?),
-                "backend" | "" => return None,
-                flag => flags.push(flag.to_owned()),
+        for option in options {
+            let name = option.strip_prefix("--")?;
+
+            match Backend::named(name) {
+                Some(named) if backend.is_none() => backend = Some(named),
+                Some(_) => return None,
+                None if name.is_empty() => return None,
+                None => flags.push(name.to_owned()),
             }
         }
 
@@ -171,16 +172,16 @@ fn main() -> ExitCode {
 fn test(asked: &Test) -> Result<bool, String> {
     let project_dir = Path::new(".");
 
-    if asked.backend != Backend::Command
+    if asked.backend != Backend::Standalone
         && let Some(flag) = asked.flags.first()
     {
         return Err(format!(
-            "--{flag} isn't an option of litmus; a flag of the project's own goes with --backend command"
+            "--{flag} isn't an option of litmus; a flag of the project's own goes with --standalone"
         ));
     }
 
     let ran = match asked.backend {
-        Backend::Command => run_with_command(project_dir, &asked.flags)?,
+        Backend::Standalone => run_standalone(project_dir, &asked.flags)?,
         Backend::Plugin | Backend::Cloud => run_in_place(project_dir, &asked.backend)?,
     };
 
@@ -195,11 +196,11 @@ fn test(asked: &Test) -> Result<bool, String> {
     Ok(Tally::of(&run.specs).passed())
 }
 
-fn run_with_command(project_dir: &Path, flags: &[String]) -> Result<Ran, String> {
-    let runtime = Config::read(project_dir)?.command()?;
+fn run_standalone(project_dir: &Path, flags: &[String]) -> Result<Ran, String> {
+    let runtime = Config::read(project_dir)?.standalone()?;
 
     Ok(Ran {
-        results: command::run(project_dir, &runtime, flags)?,
+        results: standalone::run(project_dir, &runtime, flags)?,
         sources: Sources::Disk,
     })
 }
@@ -273,32 +274,31 @@ mod tests {
 
     #[test]
     fn reads_the_backend_a_test_run_names() {
-        assert_eq!(Command::parse(&["test", "--backend", "plugin"]), test_on(Backend::Plugin, &[]));
-        assert_eq!(Command::parse(&["test", "--backend", "cloud"]), test_on(Backend::Cloud, &[]));
-        assert_eq!(Command::parse(&["test", "--backend", "command"]), test_on(Backend::Command, &[]));
+        assert_eq!(Command::parse(&["test", "--plugin"]), test_on(Backend::Plugin, &[]));
+        assert_eq!(Command::parse(&["test", "--cloud"]), test_on(Backend::Cloud, &[]));
+        assert_eq!(Command::parse(&["test", "--standalone"]), test_on(Backend::Standalone, &[]));
     }
 
     #[test]
     fn keeps_any_other_flag_for_the_project() {
         assert_eq!(
-            Command::parse(&["test", "--coverage", "--backend", "command", "--full-trace"]),
-            test_on(Backend::Command, &["coverage", "full-trace"])
+            Command::parse(&["test", "--coverage", "--standalone", "--full-trace"]),
+            test_on(Backend::Standalone, &["coverage", "full-trace"])
         );
-        assert_eq!(Command::parse(&["test", "--cloud"]), test_on(Backend::Plugin, &["cloud"]));
+        assert_eq!(Command::parse(&["test", "--backend"]), test_on(Backend::Plugin, &["backend"]));
     }
 
     #[test]
     fn refuses_options_that_do_not_add_up() {
-        assert_eq!(Command::parse(&["test", "--backend"]), None);
-        assert_eq!(Command::parse(&["test", "--backend", "studio"]), None);
-        assert_eq!(Command::parse(&["test", "--backend", "cloud", "--backend", "command"]), None);
-        assert_eq!(Command::parse(&["test", "--backend", "command", "coverage"]), None);
+        assert_eq!(Command::parse(&["test", "--cloud", "--standalone"]), None);
+        assert_eq!(Command::parse(&["test", "--plugin", "--plugin"]), None);
+        assert_eq!(Command::parse(&["test", "--standalone", "coverage"]), None);
         assert_eq!(Command::parse(&["test", "-c"]), None);
         assert_eq!(Command::parse(&["test", "--"]), None);
     }
 
     #[test]
-    fn a_flag_of_the_project_only_goes_with_its_command() {
+    fn a_flag_of_the_project_only_goes_with_a_standalone_run() {
         let asked = Test {
             backend: Backend::Cloud,
             flags: vec!["coverage".to_owned()],
@@ -306,6 +306,6 @@ mod tests {
 
         let problem = test(&asked).unwrap_err();
 
-        assert!(problem.contains("--coverage") && problem.contains("--backend command"), "{problem}");
+        assert!(problem.contains("--coverage") && problem.contains("--standalone"), "{problem}");
     }
 }

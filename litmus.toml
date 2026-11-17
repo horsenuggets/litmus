@@ -2,7 +2,7 @@
 universe = 10756976039
 place = 109535589334533
 
-[command]
+[standalone]
 run = ["lune", "run"]
 lib = "lib"
 

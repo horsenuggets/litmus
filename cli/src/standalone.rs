@@ -10,7 +10,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-const HARNESS: &str = include_str!("command/harness.luau");
+const HARNESS: &str = include_str!("standalone/harness.luau");
 
 const FOLDER: &str = ".litmus";
 const SCRIPT: &str = "run.luau";
@@ -20,7 +20,7 @@ const BUDGET: Duration = Duration::from_secs(300);
 const SPEC_ENDINGS: [&str; 2] = [".spec.luau", ".spec.lua"];
 const MODULE_ENDINGS: [&str; 2] = [".luau", ".lua"];
 const SHIPPED_ADAPTER: &str = "Adapter/Lune";
-const OWN_OPTIONS: [&str; 3] = ["backend", "help", "version"];
+const OWN_OPTIONS: [&str; 5] = ["plugin", "cloud", "standalone", "help", "version"];
 
 #[derive(Deserialize, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -61,7 +61,7 @@ impl Runtime {
 
 pub fn run(project_dir: &Path, runtime: &Runtime, flags: &[String]) -> Result<Value, String> {
     if let Some(flag) = flags.iter().find(|flag| !runtime.flags.contains(flag)) {
-        return Err(format!("--{flag} isn't a flag litmus.toml lists under [command]"));
+        return Err(format!("--{flag} isn't a flag litmus.toml lists under [standalone]"));
     }
 
     let specs = find_specs(project_dir, &runtime.specs)?;
@@ -190,7 +190,7 @@ fn execute(project_dir: &Path, run: &[String]) -> Result<String, String> {
         .stdout(Stdio::piped())
         .spawn()
         .map_err(|error| {
-            format!("couldn't start `{shown}`, which begins with what litmus.toml gives as `run` under [command]: {error}")
+            format!("couldn't start `{shown}`, which begins with what litmus.toml gives as `run` under [standalone]: {error}")
         })?;
 
     let Some(output) = child.stdout.take() else {
@@ -252,7 +252,7 @@ mod tests {
     }
 
     fn project(name: &str, files: &[&str]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("litmus-{}-command-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("litmus-{}-standalone-{name}", std::process::id()));
 
         for file in files {
             let file = dir.join(file);
@@ -392,7 +392,7 @@ mod tests {
 
         assert_eq!(flags("with-dashes-2").check(), Ok(()));
 
-        for flag in ["backend", "help", "version", "", "Coverage", "--coverage", "-c", "two words"] {
+        for flag in ["plugin", "cloud", "standalone", "help", "version", "", "Coverage", "--coverage", "-c", "two words"] {
             assert!(flags(flag).check().is_err(), "{flag}");
         }
     }

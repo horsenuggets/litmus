@@ -1,4 +1,4 @@
-[command]
+[standalone]
 run = ["lune", "run"]
 lib = "../../lib"
 specs = ["tests"]
