@@ -173,6 +173,7 @@ mod tests {
     const PLACE: Place = Place {
         universe: 11,
         place: 22,
+        build: None,
     };
 
     #[derive(Debug, PartialEq)]

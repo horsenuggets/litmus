@@ -1,13 +1,14 @@
 mod client;
 mod place;
 
+use crate::luau;
 use crate::manifest::Manifest;
 use client::{Client, Progress};
 use serde::Deserialize;
 use serde_json::Value;
 use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -27,15 +28,16 @@ const PATIENCE: Duration = Duration::from_secs(360);
 pub struct Place {
     pub universe: u64,
     pub place: u64,
+    pub build: Option<PathBuf>,
 }
 
 /// Runs the project's specs in a version of the place saved for this run, and returns the results as the lib wrote them
-pub fn run(project_dir: &Path, manifest: &Manifest, place: &Place, build: Option<&Path>) -> Result<Value, String> {
+pub fn run(project_dir: &Path, manifest: &Manifest, place: &Place) -> Result<Value, String> {
     let client = Client::new(key(project_dir)?);
 
-    let file = match build {
+    let file = match &place.build {
         // Taken at its word: nothing checks that it holds the code on disk, as the hashes do for a place in Studio
-        Some(build) => place::read(build)?,
+        Some(build) => place::read(&project_dir.join(build))?,
         None => place::build(project_dir)?,
     };
 
@@ -55,7 +57,7 @@ fn key(project_dir: &Path) -> Result<String, String> {
         .ok_or_else(|| {
             format!(
                 "{KEY_VARIABLE} isn't set, in the environment or in the project's {DOTENV}; \
-                 --cloud runs under the Open Cloud API key it holds"
+                 a cloud run goes under the Open Cloud API key it holds"
             )
         })
 }
@@ -75,25 +77,7 @@ fn script(manifest: &Manifest) -> Result<String, String> {
         .map_err(|error| format!("couldn't write the list of specs: {error}"))?;
 
     // The file starts on the first line, so a line number in an error is a line of the file
-    Ok(format!("return (function(...) {TASK}\nend)({})", luau_string(&specs)))
-}
-
-/// Every byte that could end the string or mean something else in it is written as its number
-fn luau_string(text: &str) -> String {
-    let mut literal = String::from("\"");
-
-    for byte in text.bytes() {
-        let plain = byte == b' ' || (byte.is_ascii_graphic() && byte != b'"' && byte != b'\\');
-
-        if plain {
-            literal.push(char::from(byte));
-        } else {
-            literal.push_str(&format!("\\{byte:03}"));
-        }
-    }
-
-    literal.push('"');
-    literal
+    Ok(format!("return (function(...) {TASK}\nend)({})", luau::string(&specs)))
 }
 
 /// What the task's script returned, once it has
@@ -164,13 +148,6 @@ mod tests {
             script.ends_with("\nend)(\"[[\\034ReplicatedStorage\\034,\\034Thing.spec\\034]]\")"),
             "{script}"
         );
-    }
-
-    #[test]
-    fn a_luau_string_spells_out_whatever_is_not_plain() {
-        assert_eq!(luau_string("a b"), "\"a b\"");
-        assert_eq!(luau_string("\"\\\n"), "\"\\034\\092\\010\"");
-        assert_eq!(luau_string("é"), "\"\\195\\169\"");
     }
 
     #[test]

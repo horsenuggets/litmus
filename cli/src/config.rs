@@ -1,4 +1,5 @@
 use crate::cloud::Place;
+use crate::command::Runtime;
 use serde::Deserialize;
 use std::fs;
 use std::io::ErrorKind;
@@ -10,6 +11,7 @@ const FILE: &str = "litmus.toml";
 #[serde(deny_unknown_fields)]
 pub struct Config {
     cloud: Option<Place>,
+    command: Option<Runtime>,
 }
 
 impl Config {
@@ -22,14 +24,32 @@ impl Config {
     }
 
     fn parse(text: &str) -> Result<Config, String> {
-        toml::from_str(text).map_err(|error| format!("couldn't read {FILE}: {error}"))
+        let config: Config = toml::from_str(text).map_err(|error| format!("couldn't read {FILE}: {error}"))?;
+
+        if let Some(runtime) = &config.command {
+            runtime
+                .check()
+                .map_err(|problem| format!("{FILE} has a [command] table that doesn't add up: {problem}"))?;
+        }
+
+        Ok(config)
     }
 
     pub fn cloud(self) -> Result<Place, String> {
         self.cloud.ok_or_else(|| {
             format!(
-                "{FILE} names no place for --cloud to run in; \
+                "{FILE} names no place for a cloud run; \
                  it needs a [cloud] table with the experience as `universe` and its place as `place`"
+            )
+        })
+    }
+
+    pub fn command(self) -> Result<Runtime, String> {
+        self.command.ok_or_else(|| {
+            format!(
+                "{FILE} names no command to run the tests with; it needs a [command] table with \
+                 the command that runs a Luau file as `run`, the folder of litmus's lib as `lib`, \
+                 and where to look for .spec files as `specs`"
             )
         })
     }
@@ -38,6 +58,9 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    const COMMAND: &str = "[command]\nrun = [\"lune\", \"run\"]\nlib = \"lib\"\nspecs = [\"tests\"]\n";
 
     #[test]
     fn reads_where_a_cloud_run_happens() {
@@ -48,8 +71,16 @@ mod tests {
             Ok(Place {
                 universe: 11,
                 place: 22,
+                build: None,
             })
         );
+    }
+
+    #[test]
+    fn reads_the_place_file_a_cloud_run_uploads() {
+        let config = Config::parse("[cloud]\nuniverse = 11\nplace = 22\nbuild = \"build.rbxl\"\n").unwrap();
+
+        assert_eq!(config.cloud().unwrap().build, Some(PathBuf::from("build.rbxl")));
     }
 
     #[test]
@@ -72,5 +103,47 @@ mod tests {
     fn refuses_a_name_it_does_not_know() {
         assert!(Config::parse("[cloud]\nuniverse = 11\nplace = 22\nplaec = 33\n").is_err());
         assert!(Config::parse("[clowd]\nuniverse = 11\nplace = 22\n").is_err());
+        assert!(Config::parse(&format!("{COMMAND}adaptor = \"adapter.luau\"\n")).is_err());
+    }
+
+    #[test]
+    fn reads_the_command_that_runs_the_tests() {
+        let config = Config::parse(COMMAND).unwrap();
+
+        assert_eq!(
+            config.command(),
+            Ok(Runtime {
+                run: vec!["lune".to_owned(), "run".to_owned()],
+                lib: "lib".to_owned(),
+                specs: vec!["tests".to_owned()],
+                adapter: None,
+                flags: vec![],
+            })
+        );
+    }
+
+    #[test]
+    fn reads_the_adapter_and_the_flags_a_project_adds() {
+        let text = format!("{COMMAND}adapter = \"tools/adapter.luau\"\nflags = [\"coverage\"]\n");
+        let runtime = Config::parse(&text).unwrap().command().unwrap();
+
+        assert_eq!(runtime.adapter, Some("tools/adapter.luau".to_owned()));
+        assert_eq!(runtime.flags, ["coverage"]);
+    }
+
+    #[test]
+    fn a_project_without_the_table_has_no_command_to_run() {
+        assert!(Config::default().command().unwrap_err().contains("[command]"));
+        assert!(Config::parse("[cloud]\nuniverse = 11\nplace = 22\n").unwrap().command().is_err());
+    }
+
+    #[test]
+    fn refuses_a_command_it_could_not_run() {
+        assert!(Config::parse("[command]\nlib = \"lib\"\nspecs = [\"tests\"]\n").is_err());
+        assert!(Config::parse("[command]\nrun = []\nlib = \"lib\"\nspecs = [\"tests\"]\n").is_err());
+        assert!(Config::parse("[command]\nrun = \"lune run\"\nlib = \"lib\"\nspecs = [\"tests\"]\n").is_err());
+
+        let problem = Config::parse(&format!("{COMMAND}flags = [\"backend\"]\n")).unwrap_err();
+        assert!(problem.contains("[command]") && problem.contains("\"backend\""), "{problem}");
     }
 }
