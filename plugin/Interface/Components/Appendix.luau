@@ -57,7 +57,7 @@ local function appendix(scope: flux.Scope, props: Props): Frame
             color = colors.brightText,
         })
 
-        return padded(position, "Heading", shown, HEADING_TOP, HEADING_BOTTOM)
+        return padded(position, "Heading", { scope:element "UIListLayout" {}, shown }, HEADING_TOP, HEADING_BOTTOM)
     end
 
     local function text(position: number, shown: string): Frame
