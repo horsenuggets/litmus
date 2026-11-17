@@ -36,7 +36,7 @@ export type Source = {
     text: string,
 }
 
-export type Shown = {
+export type Collected = {
     results: any,
     sources: { Source },
 }
@@ -105,18 +105,18 @@ function bridge.claim(offer: Offer): boolean
     return post(offer, "/claim", { place = game.Name })
 end
 
-function bridge.collect(offer: ShowOffer): Shown?
+function bridge.collect(offer: ShowOffer): Collected?
     local ok: boolean, body: string = send(offer.port, "POST", "/collect", { runId = offer.runId, place = game.Name })
     if not ok then
         return nil
     end
 
-    local decoded: boolean, shown: any = pcall(httpService.JSONDecode, httpService, body)
-    if not decoded or type(shown) ~= "table" or type(shown.results) ~= "table" or type(shown.sources) ~= "table" then
+    local decoded: boolean, collected: any = pcall(httpService.JSONDecode, httpService, body)
+    if not decoded or type(collected) ~= "table" or type(collected.results) ~= "table" or type(collected.sources) ~= "table" then
         return nil
     end
 
-    return shown
+    return collected
 end
 
 function bridge.reportMismatch(offer: Offer, missing: { Path }, differing: { Path }): ()

@@ -28,21 +28,21 @@ local settled: { [number]: string } = {}
 local listener: Listener? = nil
 
 local function collected(offer: bridge.ShowOffer): Arrival?
-    local shown: bridge.Shown? = bridge.collect(offer)
-    if not shown then
+    local received: bridge.Collected? = bridge.collect(offer)
+    if not received then
         warn(`[Litmus]: couldn't collect the standalone run of {offer.project}`)
         return nil
     end
 
     local texts: { [string]: string } = {}
-    for _, source in shown.sources do
+    for _, source in received.sources do
         texts[table.concat(source.path, "/")] = source.text
     end
 
     print(`[Litmus]: collected the standalone run of {offer.project}`)
 
     return {
-        ran = outcome.ofLib(shown.results),
+        ran = outcome.ofLib(received.results),
         origin = "Standalone",
 
         sourceAt = function(path: outcome.Path): string?
