@@ -1,14 +1,19 @@
 local litmus = require("../../lib")
 local lune = require("../../lib/Adapter/Lune")
 
-local function counts(specs: { litmus.SpecResult }): litmus.Remarks
-    local lines: { string } = { "Tests in each spec" }
+local report = litmus.report
 
-    for _, spec in specs do
-        table.insert(lines, `  {table.concat(spec.path, "/")}  {#spec.tests}`)
+local function counts(specs: { litmus.SpecResult }): litmus.Remarks
+    local rows: { litmus.Row } = {}
+
+    for index, spec in specs do
+        rows[index] = report.row({
+            table.concat(spec.path, "/"),
+            report.cell(tostring(#spec.tests), { align = "right" }),
+        })
     end
 
-    return { appendix = table.concat(lines, "\n") }
+    return { appendix = { report.heading("Tests in each spec"), report.tree(rows) } }
 end
 
 local function adapter(options: lune.Options): litmus.Adapter
