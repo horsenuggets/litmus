@@ -2,21 +2,14 @@ use crate::component;
 use crate::manifest::Manifest;
 use crate::results::{Appendix, Failure, Run, SpecResult, Tally};
 use crate::server::Mismatch;
-use anstyle::{AnsiColor, Color, RgbColor, Style};
+use crate::style::{BOLD, DIM, GREEN, ORANGE, ORANGE_COLOR, RED, badge, paint};
+use anstyle::{AnsiColor, Color, Style};
 use std::collections::HashMap;
 use std::path::PathBuf;
-
-/// The sixteen named colours have no orange, so this one is given as an exact colour: #FFB042
-const ORANGE_COLOR: Color = Color::Rgb(RgbColor(255, 176, 66));
 
 const PASS_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::Green));
 const FAIL_BADGE: Style = badge(AnsiColor::BrightWhite, Color::Ansi(AnsiColor::Red));
 const ERROR_BADGE: Style = badge(AnsiColor::Black, ORANGE_COLOR);
-pub const GREEN: Style = AnsiColor::Green.on_default();
-pub const RED: Style = AnsiColor::Red.on_default();
-const ORANGE: Style = Style::new().fg_color(Some(ORANGE_COLOR));
-pub const BOLD: Style = Style::new().bold();
-pub const DIM: Style = Style::new().dimmed();
 
 /// The longest label a badge holds, so that spec names start in one column whatever the badge says
 const LABEL_WIDTH: usize = "ERROR".len();
@@ -289,17 +282,6 @@ pub fn counts(parts: &[(usize, &str, Style)]) -> String {
 
 fn plural(count: usize, noun: &str) -> String {
     format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
-}
-
-pub const fn badge(text: AnsiColor, background: Color) -> Style {
-    Style::new()
-        .fg_color(Some(Color::Ansi(text)))
-        .bg_color(Some(background))
-        .bold()
-}
-
-pub fn paint(style: Style, text: &str) -> String {
-    format!("{style}{text}{style:#}")
 }
 
 #[cfg(test)]

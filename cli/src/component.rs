@@ -1,4 +1,4 @@
-use crate::report::{BOLD, DIM, GREEN, paint};
+use crate::style::{BOLD, DIM, GREEN, paint};
 use serde::Deserialize;
 
 const METER_WIDTH: usize = 24;

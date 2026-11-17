@@ -1,12 +1,13 @@
-use crate::report::{self, BOLD, GREEN, RED};
+use crate::report;
+use crate::style::{BOLD, GREEN, RED, badge, paint};
 use anstyle::{AnsiColor, Color, Style};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::io::{self, IsTerminal, Write};
 use std::time::{Duration, Instant};
 
-const LOAD_BADGE: Style = report::badge(AnsiColor::Black, Color::Ansi(AnsiColor::White));
-const RUN_BADGE: Style = report::badge(AnsiColor::Black, Color::Ansi(AnsiColor::Cyan));
+const LOAD_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::White));
+const RUN_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::Cyan));
 
 const MAX_LISTED: usize = 5;
 const PAUSE: Duration = Duration::from_millis(100);
@@ -119,9 +120,9 @@ impl Progress {
 
         let tests = report::counts(&[(self.failed, "failed", RED), (self.passed, "passed", GREEN)]);
 
-        lines.push(format!(" {}  {} of {} done", report::paint(BOLD, "Specs"), self.done, self.specs.len()));
-        lines.push(format!(" {}  {tests}", report::paint(BOLD, "Tests")));
-        lines.push(format!(" {}   {time}", report::paint(BOLD, "Time")));
+        lines.push(format!(" {}  {} of {} done", paint(BOLD, "Specs"), self.done, self.specs.len()));
+        lines.push(format!(" {}  {tests}", paint(BOLD, "Tests")));
+        lines.push(format!(" {}   {time}", paint(BOLD, "Time")));
 
         lines
     }

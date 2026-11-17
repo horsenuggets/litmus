@@ -11,6 +11,7 @@ mod selection;
 mod server;
 mod show;
 mod standalone;
+mod style;
 
 use config::Config;
 use manifest::Manifest;
