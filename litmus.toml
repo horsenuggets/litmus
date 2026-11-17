@@ -7,4 +7,4 @@ run = ["lune", "run"]
 lib = "lib"
 
 specs = ["tests"]
-adapter = ".lune/link/Adapter.luau"
+adapter = "tests/Adapter.luau"

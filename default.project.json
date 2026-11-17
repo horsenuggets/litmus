@@ -1,6 +1,7 @@
 {
   "name": "litmus",
   "emitLegacyScripts": false,
+  "globIgnorePaths": ["tests/Adapter.luau"],
   "tree": {
     "$className": "DataModel",
     "ReplicatedStorage": {

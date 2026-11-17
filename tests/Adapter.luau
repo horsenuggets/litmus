@@ -4,11 +4,11 @@ local roblox = require "@lune/roblox"
 local serde = require "@lune/serde"
 local task = require "@lune/task"
 
-local cli = require "./Cli"
+local cli = require "../.lune/link/Cli"
 
-local litmus = require "../../lib"
-local loader = require "../../lib/Loader"
-local lune = require "../../lib/Adapter/Lune"
+local litmus = require "../lib"
+local loader = require "../lib/Loader"
+local lune = require "../lib/Adapter/Lune"
 
 type Node = {
     name: string,
