@@ -8,8 +8,9 @@ export type File = {
     hash: string,
 }
 
-export type Offer = {
+export type RunOffer = {
     protocol: number,
+    kind: "run",
     project: string,
     runId: string,
     files: { File },
@@ -19,11 +20,13 @@ export type Offer = {
     port: number,
 }
 
+export type Offer = RunOffer
+
 -- The CLI takes the first of these that is free, so the two lists have to stay the same
 local PORTS: { number } = { 37100, 37101 }
 
 -- Raised whenever the plugin and the CLI would stop understanding each other
-local PROTOCOL: number = 2
+local PROTOCOL: number = 3
 
 type Method = "GET" | "POST"
 

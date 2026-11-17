@@ -9,7 +9,7 @@ use tiny_http::{Method, Request, Response};
 const PORTS: [u16; 2] = [37100, 37101];
 
 /// Raised whenever the plugin and the CLI would stop understanding each other
-const PROTOCOL: u32 = 2;
+const PROTOCOL: u32 = 3;
 
 pub struct Timeouts {
     pub until_claimed: Duration,
@@ -29,6 +29,7 @@ impl Default for Timeouts {
 #[serde(rename_all = "camelCase")]
 struct Offer<'a> {
     protocol: u32,
+    kind: &'static str,
     project: &'a str,
     run_id: &'a str,
     files: &'a [Script],
@@ -91,6 +92,7 @@ impl Exchange {
         let run_id = new_run_id();
         let offer = serde_json::to_string(&Offer {
             protocol: PROTOCOL,
+            kind: "run",
             project: &manifest.project,
             run_id: &run_id,
             files: &manifest.scripts,
@@ -322,7 +324,8 @@ mod tests {
         };
         let offer: Value = serde_json::from_str(offer).unwrap();
 
-        assert_eq!(offer["protocol"], 2);
+        assert_eq!(offer["protocol"], 3);
+        assert_eq!(offer["kind"], "run");
         assert_eq!(offer["project"], "demo");
         assert_eq!(offer["runId"], json!(exchange.run_id));
         assert_eq!(offer["files"], json!([{ "path": ["ReplicatedStorage", "Thing.spec"], "hash": "00" }]));
