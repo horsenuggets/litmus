@@ -115,13 +115,13 @@ impl Exchange {
                 Some(_) => Answer::Status(410),
             },
 
-            (Method::Post, "/claim") => match self.read::<Claim>(body) {
+            (Method::Post, "/claim") => match read::<Claim>(&self.run_id, body) {
                 Ok(claim) if self.claimant.is_none() => Answer::Claimed(self.claimant.insert(claim.place)),
                 Ok(_) => Answer::Status(409),
                 Err(status) => Answer::Status(status),
             },
 
-            (Method::Post, "/mismatch") => match self.read::<Mismatch>(body) {
+            (Method::Post, "/mismatch") => match read::<Mismatch>(&self.run_id, body) {
                 Ok(mismatch) => {
                     self.mismatches.retain(|earlier| earlier.place != mismatch.place);
                     self.mismatches.push(mismatch);
@@ -130,7 +130,7 @@ impl Exchange {
                 Err(status) => Answer::Status(status),
             },
 
-            (Method::Post, "/result") => match (self.read::<Completion>(body), self.claimant.clone()) {
+            (Method::Post, "/result") => match (read::<Completion>(&self.run_id, body), self.claimant.clone()) {
                 (Ok(completion), Some(place)) => Answer::Finished(match completion.results {
                     Some(results) => Outcome::Results(results),
                     None => Outcome::Failed {
@@ -146,16 +146,6 @@ impl Exchange {
         }
     }
 
-    /// The message in `body`, or the status to refuse it with
-    fn read<T: DeserializeOwned>(&self, body: &str) -> Result<T, u16> {
-        let envelope: Envelope<T> = serde_json::from_str(body).map_err(|_| 400u16)?;
-        if envelope.run_id != self.run_id {
-            return Err(409);
-        }
-
-        Ok(envelope.message)
-    }
-
     /// What the run came to when nobody finished it in time
     fn expire(self) -> Outcome {
         match self.claimant {
@@ -163,6 +153,73 @@ impl Exchange {
             None => Outcome::Unclaimed(self.mismatches),
         }
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Announcement<'a> {
+    protocol: u32,
+    kind: &'static str,
+    project: &'a str,
+    run_id: &'a str,
+}
+
+#[derive(Deserialize)]
+struct Collect {
+    place: String,
+}
+
+struct Showing<'a> {
+    run_id: String,
+    offer: String,
+    run: &'a str,
+}
+
+enum Reply<'a> {
+    Offer(&'a str),
+    Run { place: String, run: &'a str },
+    Status(u16),
+}
+
+impl<'a> Showing<'a> {
+    fn new(project: &str, run: &'a str) -> Result<Showing<'a>, String> {
+        let run_id = new_run_id();
+        let offer = serde_json::to_string(&Announcement {
+            protocol: PROTOCOL,
+            kind: "show",
+            project,
+            run_id: &run_id,
+        })
+        .map_err(|error| format!("couldn't write the offer: {error}"))?;
+
+        Ok(Showing { run_id, offer, run })
+    }
+
+    fn answer(&self, method: &Method, url: &str, body: &str) -> Reply<'_> {
+        match (method, url) {
+            (Method::Get, "/offer") => Reply::Offer(&self.offer),
+
+            (Method::Post, "/collect") => match read::<Collect>(&self.run_id, body) {
+                Ok(collect) => Reply::Run {
+                    place: collect.place,
+                    run: self.run,
+                },
+                Err(status) => Reply::Status(status),
+            },
+
+            _ => Reply::Status(404),
+        }
+    }
+}
+
+/// The message in `body`, or the status to refuse it with
+fn read<T: DeserializeOwned>(run_id: &str, body: &str) -> Result<T, u16> {
+    let envelope: Envelope<T> = serde_json::from_str(body).map_err(|_| 400u16)?;
+    if envelope.run_id != run_id {
+        return Err(409);
+    }
+
+    Ok(envelope.message)
 }
 
 pub struct Server {
@@ -225,6 +282,37 @@ impl Server {
                 Answer::Finished(outcome) => {
                     respond(request, 200);
                     return Ok(outcome);
+                }
+            }
+        }
+    }
+
+    pub fn show(
+        &self,
+        project: &str,
+        run: &str,
+        window: Duration,
+        mut on_collect: impl FnMut(&str),
+    ) -> Result<(), String> {
+        let showing = Showing::new(project, run)?;
+        let deadline = Instant::now() + window;
+
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(());
+            }
+
+            let Some((request, body)) = self.receive(remaining)? else {
+                continue;
+            };
+
+            match showing.answer(request.method(), request.url(), &body) {
+                Reply::Offer(offer) => respond_with(request, 200, offer),
+                Reply::Status(status) => respond(request, status),
+                Reply::Run { place, run } => {
+                    respond_with(request, 200, run);
+                    on_collect(&place);
                 }
             }
         }
@@ -422,6 +510,53 @@ mod tests {
         );
     }
 
+    fn showing() -> Showing<'static> {
+        Showing::new("demo", r#"{"results":{"specs":[]}}"#).unwrap()
+    }
+
+    fn collected(showing: &Showing, place: &str) -> Option<String> {
+        let collect = json!({ "runId": showing.run_id, "place": place }).to_string();
+
+        match showing.answer(&Method::Post, "/collect", &collect) {
+            Reply::Run { place, run } => Some(format!("{place}: {run}")),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_finished_run_is_offered_as_one_to_show() {
+        let showing = showing();
+        let Reply::Offer(offer) = showing.answer(&Method::Get, "/offer", "") else {
+            panic!("expected the offer");
+        };
+        let offer: Value = serde_json::from_str(offer).unwrap();
+
+        assert_eq!(
+            offer,
+            json!({ "protocol": 3, "kind": "show", "project": "demo", "runId": showing.run_id })
+        );
+    }
+
+    #[test]
+    fn every_place_that_asks_is_handed_the_run_and_the_offer_stands() {
+        let showing = showing();
+        let run = r#"{"results":{"specs":[]}}"#;
+
+        assert_eq!(collected(&showing, "First"), Some(format!("First: {run}")));
+        assert_eq!(collected(&showing, "Second"), Some(format!("Second: {run}")));
+        assert!(matches!(showing.answer(&Method::Get, "/offer", ""), Reply::Offer(_)));
+    }
+
+    #[test]
+    fn a_shown_run_is_not_handed_to_whoever_asks_for_another() {
+        let showing = showing();
+        let stranger = json!({ "runId": "someone-else", "place": "First" }).to_string();
+
+        assert!(matches!(showing.answer(&Method::Post, "/collect", &stranger), Reply::Status(409)));
+        assert!(matches!(showing.answer(&Method::Post, "/collect", "not json"), Reply::Status(400)));
+        assert!(matches!(showing.answer(&Method::Post, "/claim", &stranger), Reply::Status(404)));
+    }
+
     /// Plays the plugin's part over a real connection: one request, returning the status and the body
     fn send(host: &str, port: u16, method: &str, route: &str, body: &str) -> (u16, String) {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -475,6 +610,35 @@ mod tests {
         let (outcome, claimed) = handle.join().unwrap();
         assert_eq!(outcome, Outcome::Results(json!([])));
         assert_eq!(claimed, ["First"]);
+    }
+
+    #[test]
+    fn a_finished_run_is_shown_over_http_until_the_window_shuts() {
+        let server = Server::bind(0).unwrap();
+        let port = server.port();
+        let host = format!("127.0.0.1:{port}");
+
+        let handle = thread::spawn(move || {
+            let mut collected = Vec::new();
+            server
+                .show("demo", r#"{"results":{"specs":[]}}"#, Duration::from_millis(500), |place| {
+                    collected.push(place.to_owned());
+                })
+                .unwrap();
+
+            collected
+        });
+
+        let (status, body) = send(&host, port, "GET", "/offer", "");
+        let offer: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(status, 200);
+
+        let collect = |place: &str| json!({ "runId": offer["runId"], "place": place }).to_string();
+        let run = (200, r#"{"results":{"specs":[]}}"#.to_owned());
+        assert_eq!(send(&host, port, "POST", "/collect", &collect("First")), run);
+        assert_eq!(send(&host, port, "POST", "/collect", &collect("Second")), run);
+
+        assert_eq!(handle.join().unwrap(), ["First", "Second"]);
     }
 
     #[test]
