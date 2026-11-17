@@ -38,13 +38,13 @@ export type Adapter = {
 }
 
 export type Remarks = {
-    appendix: (string | { pieces.Component })?,
+    appendix: { pieces.Component }?,
     failure: string?,
 }
 
 export type Run = {
     specs: { SpecResult },
-    appendix: (string | { pieces.Component })?,
+    appendix: { pieces.Component }?,
     failure: string?,
 }
 
@@ -178,7 +178,12 @@ local function remarksOf(adapter: Adapter, results: { SpecResult }): Remarks
     end
 
     if type(remarks) ~= "table" then
-        error(`[Litmus]: the adapter's results returned a {type(remarks)}; they return a table, with any text to print as its appendix`, 0)
+        error(`[Litmus]: the adapter's results returned a {type(remarks)}; they return a table, with an appendix and a failure, both optional`, 0)
+    end
+
+    local appendix: unknown = (remarks :: any).appendix
+    if appendix ~= nil and type(appendix) ~= "table" then
+        error(`[Litmus]: the adapter's results gave its appendix as a {type(appendix)}; an appendix is a list of pieces, and report.text makes one of plain text`, 0)
     end
 
     return remarks :: any

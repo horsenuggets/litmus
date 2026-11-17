@@ -131,5 +131,4 @@ test("a run carries the pieces an adapter gives as its appendix", function(): ()
     local pieces: { litmus.Component } = { report.heading("Lines run"), report.tree({ report.row({ "Source" }) }) }
 
     expect.equal(litmus.run(adapterWith(pieces)).appendix, pieces)
-    expect.equal(litmus.run(adapterWith("text")).appendix, "text")
 end)

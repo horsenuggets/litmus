@@ -3,6 +3,7 @@ local litmus = require("../../Litmus")
 
 local expect = litmus.expect
 local group = litmus.group
+local report = litmus.report
 local test = litmus.test
 
 local function adapterWith(results: ((specs: { litmus.SpecResult }) -> litmus.Remarks?)?): litmus.Adapter
@@ -35,10 +36,10 @@ end)
 group("appendix", function(): ()
     test("is whatever the adapter says of the results", function(): ()
         local ran: litmus.Run = litmus.run(adapterWith(function(specs: { litmus.SpecResult }): litmus.Remarks?
-            return { appendix = `{#specs} specs` }
+            return { appendix = { report.text(`{#specs} specs`) } }
         end))
 
-        expect.equal(ran.appendix, "0 specs")
+        expect.same(ran.appendix, { { kind = "text", text = "0 specs" } })
         expect.equal(ran.failure, nil)
     end)
 
@@ -80,4 +81,14 @@ test("refuses results that aren't a table", function(): ()
     end
 
     expect.error(runWithText, "the adapter's results returned a string")
+end)
+
+test("refuses an appendix that isn't a list of pieces", function(): ()
+    local function runWithTextAppendix(): ()
+        litmus.run(adapterWith(function(_: { litmus.SpecResult }): litmus.Remarks?
+            return { appendix = "0 specs" :: any }
+        end))
+    end
+
+    expect.error(runWithTextAppendix, "the adapter's results gave its appendix as a string")
 end)

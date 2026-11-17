@@ -1,6 +1,6 @@
 use crate::component;
 use crate::manifest::Manifest;
-use crate::results::{Appendix, Failure, Run, SpecResult, Tally};
+use crate::results::{Failure, Run, SpecResult, Tally};
 use crate::style::{BOLD, DIM, GREEN, ORANGE, ORANGE_COLOR, RED, badge, paint};
 use anstyle::{AnsiColor, Color, Style};
 use std::collections::HashMap;
@@ -87,11 +87,7 @@ pub fn render(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
     }
 
     if let Some(appendix) = &run.appendix {
-        match appendix {
-            Appendix::Text(text) => lines.extend(text.trim_end().lines().map(str::to_owned)),
-            Appendix::Components(components) => lines.extend(component::render(components)),
-        }
-
+        lines.extend(component::render(appendix));
         lines.push(String::new());
     }
 
@@ -253,6 +249,7 @@ fn plural(count: usize, noun: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::component::Component;
     use crate::manifest::Script;
 
     fn manifest() -> Manifest {
@@ -284,7 +281,7 @@ mod tests {
     fn run(results: &str, appendix: Option<&str>) -> Run {
         Run {
             specs: serde_json::from_str(results).unwrap(),
-            appendix: appendix.map(|text| Appendix::Text(text.to_owned())),
+            appendix: appendix.map(|text| vec![Component::Text { text: text.to_owned() }]),
             failure: None,
         }
     }

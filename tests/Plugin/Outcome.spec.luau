@@ -114,10 +114,12 @@ end)
 
 group("ofLib", function(): ()
     test("makes a run of what the lib returned", function(): ()
-        expect.same(outcome.ofLib({ specs = { PASSED }, appendix = "text", failure = "too little ran" }), {
+        local appendix: outcome.Appendix = { { kind = "text", text = "text" } }
+
+        expect.same(outcome.ofLib({ specs = { PASSED }, appendix = appendix, failure = "too little ran" }), {
             kind = "results",
             results = { PASSED },
-            appendix = "text",
+            appendix = appendix,
             failure = "too little ran",
         })
 

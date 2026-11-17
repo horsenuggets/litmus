@@ -178,11 +178,8 @@ local function appendix(scope: flux.Scope, props: Props): Frame
         }
     end
 
-    local given: outcome.Appendix = props.appendix
-    local pieces: { outcome.Piece } = if type(given) == "string" then { { kind = "text", text = given } } else given
-
     local built: { Instance } = {}
-    for position, piece in pieces do
+    for position, piece in props.appendix do
         local made: any = piece
 
         if made.kind == "heading" then

@@ -53,7 +53,7 @@ export type Piece =
     | { kind: "legend", items: { Key } }
     | { kind: "tree", rows: { Row } }
 
-export type Appendix = string | { Piece }
+export type Appendix = { Piece }
 
 -- What came of a run: its results, or why there are none
 export type Run =

@@ -27,16 +27,9 @@ pub struct SpecResult {
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
-pub enum Appendix {
-    Text(String),
-    Components(Vec<Component>),
-}
-
-#[derive(Deserialize)]
 pub struct Run {
     pub specs: Vec<SpecResult>,
-    pub appendix: Option<Appendix>,
+    pub appendix: Option<Vec<Component>>,
     pub failure: Option<String>,
 }
 
@@ -142,7 +135,6 @@ mod tests {
         let run = |rest: &str| serde_json::from_str::<Run>(&format!(r#"{{ "specs": {specs}{rest} }}"#)).unwrap();
 
         assert!(run("").passed());
-        assert!(run(r#", "appendix": "text""#).passed());
         assert!(run(r#", "appendix": [{ "kind": "heading", "text": "Lines run" }]"#).passed());
         assert!(!run(r#", "failure": "too little ran""#).passed());
     }
