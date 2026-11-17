@@ -81,6 +81,49 @@ local EXPECTED: { ExpectedTest } = {
         failure = { message = "expected an error, got none", line = 51 },
     },
     { name = "passes on tables that contain themselves", groups = { "same" } },
+    { name = "passes on a value that counts as true", groups = { "truthy" } },
+    {
+        name = "fails on nil",
+        groups = { "truthy" },
+        failure = { message = "expected a truthy value, got nil", line = 74 },
+    },
+    {
+        name = "fails on false",
+        groups = { "truthy" },
+        failure = { message = "expected a truthy value, got false", line = 78 },
+    },
+    { name = "passes on different values", groups = { "never.equal" } },
+    { name = "passes on separate tables with the same contents", groups = { "never.equal" } },
+    {
+        name = "fails on equal values",
+        groups = { "never.equal" },
+        failure = { message = 'expected anything but "left"', line = 92 },
+    },
+    { name = "passes where a nested value differs", groups = { "never.same" } },
+    {
+        name = "fails on tables with the same contents",
+        groups = { "never.same" },
+        failure = { message = "expected different contents, got the same", line = 102 },
+    },
+    { name = "passes on nil and on false", groups = { "never.truthy" } },
+    {
+        name = "fails on a value that counts as true",
+        groups = { "never.truthy" },
+        failure = { message = 'expected nil or false, got "set"', line = 113 },
+    },
+    { name = "passes when the error contains the text", groups = { "error" } },
+    { name = "passes when a position comes before the text", groups = { "error" } },
+    { name = "takes the text as written, never as a pattern", groups = { "error" } },
+    {
+        name = "fails when the error says something else",
+        groups = { "error" },
+        failure = { message = 'expected an error containing "no fuse", got "the fuse is lit"', line = 145 },
+    },
+    {
+        name = "fails when the function meant to throw the text returns",
+        groups = { "error" },
+        failure = { message = 'expected an error containing "fuse", got none', line = 149 },
+    },
 }
 
 local mismatches: { string } = {}

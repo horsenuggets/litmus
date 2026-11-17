@@ -64,10 +64,46 @@ function expect.same<T>(actual: T, expected: T): ()
     end
 end
 
-function expect.error(run: () -> ...unknown): ()
-    if pcall(run) then
-        failure.raise("expected an error, got none", 2)
+function expect.truthy(value: unknown): ()
+    if not value then
+        failure.raise(`expected a truthy value, got {show(value)}`, 2)
     end
 end
+
+function expect.error(run: () -> ...unknown, text: string?): ()
+    local succeeded: boolean, thrown: unknown = pcall(run)
+    local wanted: string = if text then `an error containing {show(text)}` else "an error"
+
+    if succeeded then
+        failure.raise(`expected {wanted}, got none`, 2)
+    end
+
+    local message: string = tostring(thrown)
+    if text and not string.find(message, text, 1, true) then
+        failure.raise(`expected {wanted}, got {show(message)}`, 2)
+    end
+end
+
+local never = {}
+
+function never.equal<T>(actual: T, unwanted: T): ()
+    if actual == unwanted then
+        failure.raise(`expected anything but {show(unwanted)}`, 2)
+    end
+end
+
+function never.same<T>(actual: T, unwanted: T): ()
+    if not difference(actual, unwanted, "", {}) then
+        failure.raise("expected different contents, got the same", 2)
+    end
+end
+
+function never.truthy(value: unknown): ()
+    if value then
+        failure.raise(`expected nil or false, got {show(value)}`, 2)
+    end
+end
+
+expect.never = never
 
 return expect
