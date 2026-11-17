@@ -128,7 +128,76 @@ local SAMPLE_RESULTS: { outcome.SpecResult } = {
     },
 }
 
-local SAMPLE_RUN: outcome.Run = { kind = "results", results = SAMPLE_RESULTS }
+local function lines(ran: number, loaded: number, all: number): { outcome.Cell }
+    return {
+        {
+            kind = "meter",
+            parts = {
+                { value = ran, tone = "good" },
+                { value = loaded - ran, tone = "plain" },
+                { value = all - loaded, tone = "dim" },
+            },
+        },
+        { kind = "cell", text = `{math.floor(ran * 1000 / all) / 10}%`, align = "right", tone = "plain" },
+        { kind = "cell", text = tostring(ran), align = "right", tone = "dim" },
+        { kind = "cell", text = tostring(all), align = "right", tone = "dim" },
+    }
+end
+
+local function folder(name: outcome.Cell, counts: { outcome.Cell }, open: boolean, rows: { outcome.Row }?): outcome.Row
+    return { cells = { name, table.unpack(counts) }, open = open, rows = rows or {} }
+end
+
+local function dim(name: string): outcome.Cell
+    return { kind = "cell", text = name, align = "left", tone = "dim" }
+end
+
+-- One of each piece an adapter can add under the specs, as a coverage report would use them
+local SAMPLE_APPENDIX: outcome.Appendix = {
+    { kind = "heading", text = "Lines run by folder" },
+    {
+        kind = "legend",
+        items = {
+            { label = "ran", tone = "good" },
+            { label = "loaded but not run", tone = "plain" },
+            { label = "never loaded", tone = "dim" },
+        },
+    },
+    {
+        kind = "tree",
+        rows = {
+            folder("src", lines(1840, 5200, 24000), true, {
+                folder("Shop", lines(1700, 4900, 23800), true, {
+                    folder("Checkout", lines(980, 2900, 9600), false, {
+                        folder("Cart", lines(700, 2500, 3400), false, {
+                            folder("Totals.luau", lines(140, 610, 610), false),
+                            folder("AVeryLongModuleNameThatHasToBeCutShortToFit.luau", lines(80, 576, 576), false),
+                        }),
+                        folder("Receipts", lines(9, 9, 9), false),
+                        folder(dim("2 folders no test loaded"), lines(0, 0, 1200), false, {
+                            folder(dim("Coupons"), lines(0, 0, 1100), false),
+                            folder(dim("Refunds"), lines(0, 0, 100), false),
+                        }),
+                    }),
+                    folder(dim("Catalog"), lines(0, 0, 4100), false),
+                }),
+                folder("Shared", lines(124, 150, 155), false, {
+                    folder("Format.luau", lines(119, 125, 125), false),
+                }),
+                folder("Tools", lines(16, 22, 22), false),
+            }),
+        },
+    },
+    {
+        kind = "stats",
+        items = {
+            { label = "Coverage", text = "7.7% of 24,000 lines ran" },
+            { label = "Loaded", text = "96 of 310 modules, 35.4% of their lines ran" },
+        },
+    },
+}
+
+local SAMPLE_RUN: outcome.Run = { kind = "results", results = SAMPLE_RESULTS, appendix = SAMPLE_APPENDIX }
 
 -- Shows the control window without and with results from the CLI, sharing one checkbox state, beside the results window
 local function story(target: Frame): () -> ()

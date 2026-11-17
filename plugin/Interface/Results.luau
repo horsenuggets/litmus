@@ -1,3 +1,4 @@
+local appendix = require("./Components/Appendix")
 local collapsible = require("./Components/Collapsible")
 local flux = require("../Packages/Flux")
 local iconLine = require("./Components/IconLine")
@@ -30,6 +31,8 @@ local function results(scope: flux.Scope, props: Props): Frame
     end)
 
     local picked: flux.Value<outcome.Status?> = scope:value(nil :: outcome.Status?)
+
+    local opened: { [string]: boolean } = {}
 
     -- A pick only holds while some spec has that outcome, so new results can't leave the list empty
     local selected: flux.Computed<outcome.Status?> = scope:computed(function(use: flux.Use): outcome.Status?
@@ -186,7 +189,19 @@ local function results(scope: flux.Scope, props: Props): Frame
 
             -- A new run or a new pick replaces every row, since nothing ties one list's rows to the next's
             scope:computed(function(use: flux.Use, inner: flux.Scope): { Instance }
-                return listOf(inner, use(props.ran), use(selected))
+                local ran: outcome.Run = use(props.ran)
+                local rows: { Instance } = listOf(inner, ran, use(selected))
+
+                if ran.kind == "results" and ran.appendix then
+                    table.insert(rows, appendix(inner, {
+                        layoutOrder = #ran.results + 2,
+
+                        appendix = ran.appendix,
+                        opened = opened,
+                    }))
+                end
+
+                return rows
             end),
         },
     }
