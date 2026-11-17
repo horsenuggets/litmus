@@ -5,7 +5,7 @@ mod manifest;
 mod piece;
 mod plugin;
 mod progress;
-mod report;
+mod render;
 mod results;
 mod selection;
 mod server;
@@ -15,7 +15,7 @@ mod style;
 
 use config::Config;
 use manifest::Manifest;
-use report::Sources;
+use render::Sources;
 use results::Run;
 use selection::Selection;
 use serde::Deserialize;
@@ -214,7 +214,7 @@ fn test(asked: &Test) -> Result<bool, String> {
     // Asked of stdout alone, so output sent to a file or another program is never wrapped
     let columns = terminal_size_of(io::stdout()).map(|(Width(columns), _)| usize::from(columns));
 
-    anstream::print!("{}", report::render(&run, &ran.sources, columns));
+    anstream::print!("{}", render::run(&run, &ran.sources, columns));
 
     if asked.backend == Backend::Standalone && io::stdout().is_terminal() {
         show::offer(project_dir, &ran.results, &run);

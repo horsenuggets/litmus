@@ -57,7 +57,7 @@ impl Sources {
 }
 
 /// `columns` is how wide the terminal is, or nothing when the text isn't going to one
-pub fn render(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
+pub fn run(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
     let results = &run.specs;
 
     let name_width = results
@@ -287,7 +287,7 @@ mod tests {
     }
 
     fn plain_run(run: &Run, columns: Option<usize>) -> String {
-        anstream::adapter::strip_str(&render(run, &Sources::of(&manifest()), columns)).to_string()
+        anstream::adapter::strip_str(&super::run(run, &Sources::of(&manifest()), columns)).to_string()
     }
 
     #[test]
@@ -367,7 +367,7 @@ mod tests {
         };
 
         let run = run(r#"[{ "path": ["Shared", "Util", "spec"], "tests": [] }]"#, None);
-        let text = anstream::adapter::strip_str(&render(&run, &Sources::of(&manifest), None)).to_string();
+        let text = anstream::adapter::strip_str(&super::run(&run, &Sources::of(&manifest), None)).to_string();
 
         assert!(text.contains("src/Util/spec.luau"), "{text}");
     }
@@ -464,7 +464,7 @@ Coverage 4%
             } }] }]"#,
             None,
         );
-        let text = anstream::adapter::strip_str(&render(&run, &Sources::Disk, None)).to_string();
+        let text = anstream::adapter::strip_str(&super::run(&run, &Sources::Disk, None)).to_string();
 
         let expected = "
   FAIL    tests/Bad.spec.luau  0 of 1 passed

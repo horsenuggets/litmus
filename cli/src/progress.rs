@@ -1,4 +1,4 @@
-use crate::report;
+use crate::render;
 use crate::style::{BOLD, GREEN, RED, badge, paint};
 use anstyle::{AnsiColor, Color, Style};
 use serde::Deserialize;
@@ -106,7 +106,7 @@ impl Progress {
 
         let mut lines: Vec<String> = rows
             .iter()
-            .map(|(style, label, name, note)| report::headline(*style, label, name, width, note))
+            .map(|(style, label, name, note)| render::headline(*style, label, name, width, note))
             .collect();
 
         let unlisted = self.running.len().saturating_sub(MAX_LISTED);
@@ -118,7 +118,7 @@ impl Progress {
             lines.push(String::new());
         }
 
-        let tests = report::counts(&[(self.failed, "failed", RED), (self.passed, "passed", GREEN)]);
+        let tests = render::counts(&[(self.failed, "failed", RED), (self.passed, "passed", GREEN)]);
 
         lines.push(format!(" {}  {} of {} done", paint(BOLD, "Specs"), self.done, self.specs.len()));
         lines.push(format!(" {}  {tests}", paint(BOLD, "Tests")));
