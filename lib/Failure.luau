@@ -24,13 +24,13 @@ local function positionIn(message: string): (string?, number?)
 end
 
 -- The caller's own frame at or above `level`, or nothing if the walk reaches `catch`, this module's next frame up, first
-local function findCaller(level: number): (string?, number?)
+local function findCaller(level: number, isProject: (chunk: string) -> boolean): (string?, number?)
     -- `level` is as the function calling this counts it, and this function's own frame sits one below
     level += 1
 
     local source: string, line: number = debug.info(level, "sl")
     while source ~= OWN_SOURCE do
-        if line > 0 and not isLib(source) then
+        if line > 0 and not isLib(source) and isProject(source) then
             return source, line
         end
 
@@ -41,15 +41,15 @@ local function findCaller(level: number): (string?, number?)
     return nil, nil
 end
 
-local function describe(thrown: unknown): Failure
+local function describe(thrown: unknown, isProject: (chunk: string) -> boolean): Failure
     if raised[thrown] then
         return thrown :: any
     end
 
     local message: string = tostring(thrown)
 
-    -- Level 1 is this handler; C functions such as `error` come next and have no line
-    local level: number = 2
+    -- Level 1 is this function and level 2 the handler calling it; C functions such as `error` come next and have no line
+    local level: number = 3
     local source: string, line: number = debug.info(level, "sl")
     while line <= 0 do
         level += 1
@@ -57,7 +57,7 @@ local function describe(thrown: unknown): Failure
     end
 
     -- An error this lib raised on the caller's behalf belongs to the caller's line
-    local callerSource: string?, callerLine: number? = findCaller(level)
+    local callerSource: string?, callerLine: number? = findCaller(level, isProject)
     if not callerSource then
         -- None of the caller's code was running, as when a spec doesn't compile; the message names the place
         callerSource, callerLine = positionIn(message)
@@ -89,11 +89,13 @@ function failure.raise(message: string, level: number): never
 end
 
 -- Runs `body` and returns how it failed, or nil if it didn't
-function failure.catch(body: () -> ()): Failure?
+function failure.catch(body: () -> (), isProject: (chunk: string) -> boolean): Failure?
     local _: boolean, problem: Failure? = xpcall(function(): Failure?
         body()
         return nil
-    end, describe)
+    end, function(thrown: unknown): Failure
+        return describe(thrown, isProject)
+    end)
 
     return problem
 end

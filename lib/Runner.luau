@@ -57,6 +57,14 @@ local function report(adapter: Adapter, caught: failure.Failure?): Failure?
     }
 end
 
+local function catch(adapter: Adapter, body: () -> ()): Failure?
+    local caught: failure.Failure? = failure.catch(body, function(chunk: string): boolean
+        return adapter.locate(chunk) ~= nil
+    end)
+
+    return report(adapter, caught)
+end
+
 type Running = {
     count: number,
     waiter: thread?,
@@ -85,7 +93,7 @@ end
 local function runSpec(adapter: Adapter, spec: Spec, running: Running): SpecResult
     collector.begin()
 
-    local problem: failure.Failure? = failure.catch(spec.load)
+    local problem: Failure? = catch(adapter, spec.load)
 
     local tests: { collector.Test } = collector.finish()
     local results: { TestResult } = {}
@@ -96,7 +104,7 @@ local function runSpec(adapter: Adapter, spec: Spec, running: Running): SpecResu
             table.insert(results, result)
 
             start(adapter, running, function(): ()
-                result.failure = report(adapter, failure.catch(test.run))
+                result.failure = catch(adapter, test.run)
             end)
         end
     end
@@ -104,7 +112,7 @@ local function runSpec(adapter: Adapter, spec: Spec, running: Running): SpecResu
     return {
         path = spec.path,
         tests = results,
-        failure = report(adapter, problem),
+        failure = problem,
     }
 end
 
