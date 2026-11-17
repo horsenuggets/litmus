@@ -5,7 +5,7 @@ local paths = require("../Paths")
 local sources = require("../Sources")
 local theme = require("../Theme")
 local words = require("../Words")
-local wrappedText = require("./WrappedText")
+local wrappedText = require("../Components/WrappedText")
 
 export type Props = {
     failure: outcome.Failure,

@@ -2,7 +2,7 @@ local flux = require("../../Packages/Flux")
 local outcome = require("../../Outcome")
 local shares = require("../Shares")
 local theme = require("../Theme")
-local tone = require("../Tone")
+local tone = require("./Tone")
 
 export type Props = {
     parts: { outcome.Part },

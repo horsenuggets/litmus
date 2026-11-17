@@ -1,6 +1,6 @@
-local flux = require("../Packages/Flux")
-local outcome = require("../Outcome")
-local theme = require("./Theme")
+local flux = require("../../Packages/Flux")
+local outcome = require("../../Outcome")
+local theme = require("../Theme")
 
 local tone = {}
 

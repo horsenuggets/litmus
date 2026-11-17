@@ -1,9 +1,9 @@
 local flux = require("../../Packages/Flux")
-local icon = require("./Icon")
-local label = require("./Label")
+local icon = require("../Components/Icon")
+local label = require("../Components/Label")
 local outcome = require("../../Outcome")
 local statusChip = require("./StatusChip")
-local statusStyle = require("../Status")
+local statusStyle = require("./StatusStyle")
 local theme = require("../Theme")
 local words = require("../Words")
 

@@ -1,11 +1,11 @@
 local cells = require("../Cells")
-local collapsible = require("./Collapsible")
+local collapsible = require("../Components/Collapsible")
 local flux = require("../../Packages/Flux")
-local label = require("./Label")
+local label = require("../Components/Label")
 local meter = require("./Meter")
 local outcome = require("../../Outcome")
 local theme = require("../Theme")
-local tone = require("../Tone")
+local tone = require("./Tone")
 
 export type Props = {
     row: outcome.Row,

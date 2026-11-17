@@ -1,7 +1,7 @@
-local flux = require("../Packages/Flux")
-local icon = require("./Components/Icon")
-local outcome = require("../Outcome")
-local theme = require("./Theme")
+local flux = require("../../Packages/Flux")
+local icon = require("../Components/Icon")
+local outcome = require("../../Outcome")
+local theme = require("../Theme")
 
 -- How an outcome is shown, wherever it is shown
 export type Style = {

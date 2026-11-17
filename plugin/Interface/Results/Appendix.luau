@@ -1,12 +1,12 @@
 local cells = require("../Cells")
 local flux = require("../../Packages/Flux")
-local label = require("./Label")
+local label = require("../Components/Label")
 local outcome = require("../../Outcome")
 local theme = require("../Theme")
-local tone = require("../Tone")
+local tone = require("./Tone")
 local treeRow = require("./TreeRow")
 local words = require("../Words")
-local wrappedText = require("./WrappedText")
+local wrappedText = require("../Components/WrappedText")
 
 export type Props = {
     appendix: outcome.Appendix,

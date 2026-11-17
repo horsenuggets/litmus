@@ -1,7 +1,7 @@
 local button = require("../../Packages/Interface/Hooks/Button")
 local flux = require("../../Packages/Flux")
-local highlight = require("./Highlight")
-local statusStyle = require("../Status")
+local highlight = require("../Components/Highlight")
+local statusStyle = require("./StatusStyle")
 local theme = require("../Theme")
 
 export type Props = {
