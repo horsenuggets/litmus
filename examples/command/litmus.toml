@@ -1,0 +1,6 @@
+[command]
+run = ["lune", "run"]
+lib = "../../lib"
+specs = ["tests"]
+adapter = "adapter.luau"
+flags = ["counts"]
