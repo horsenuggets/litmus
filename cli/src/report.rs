@@ -11,16 +11,18 @@ const ORANGE_COLOR: Color = Color::Rgb(RgbColor(255, 176, 66));
 const PASS_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::Green));
 const FAIL_BADGE: Style = badge(AnsiColor::BrightWhite, Color::Ansi(AnsiColor::Red));
 const ERROR_BADGE: Style = badge(AnsiColor::Black, ORANGE_COLOR);
-const GREEN: Style = AnsiColor::Green.on_default();
-const RED: Style = AnsiColor::Red.on_default();
+pub const GREEN: Style = AnsiColor::Green.on_default();
+pub const RED: Style = AnsiColor::Red.on_default();
 const ORANGE: Style = Style::new().fg_color(Some(ORANGE_COLOR));
-const BOLD: Style = Style::new().bold();
+pub const BOLD: Style = Style::new().bold();
 const DIM: Style = Style::new().dimmed();
 
 /// The longest label a badge holds, so that spec names start in one column whatever the badge says
 const LABEL_WIDTH: usize = "ERROR".len();
 
 const DETAIL_INDENT: &str = "     ";
+
+const REASON_INDENT: &str = "                ";
 
 /// The narrowest column worth wrapping a message into; with less room, the terminal is left to wrap it
 const MIN_MESSAGE_WIDTH: usize = 30;
@@ -100,6 +102,7 @@ pub fn render(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
     }
 
     lines.extend(summary(&Tally::of(results)));
+    lines.extend(run.failure.as_deref().map(failed).unwrap_or_default());
     lines.push(String::new());
 
     lines.join("\n")
@@ -135,7 +138,7 @@ fn spec_lines(spec: &SpecResult, sources: &Sources, name_width: usize, columns: 
     lines
 }
 
-fn headline(style: Style, label: &str, name: &str, width: usize, note: &str) -> String {
+pub fn headline(style: Style, label: &str, name: &str, width: usize, note: &str) -> String {
     let badge = paint(style, &format!(" {label} "));
     let gap = " ".repeat(LABEL_WIDTH - label.len());
 
@@ -161,6 +164,16 @@ fn summary(tally: &Tally) -> [String; 2] {
         format!(" {}  {specs}", paint(BOLD, "Specs")),
         format!(" {}  {tests}", paint(BOLD, "Tests")),
     ]
+}
+
+fn failed(reason: &str) -> Vec<String> {
+    let mut reason = reason.trim_end().lines();
+    let first = reason.next().unwrap_or_default();
+
+    let mut lines = vec![format!(" {}    {}: {first}", paint(BOLD, "Run"), paint(RED, "failed"))];
+    lines.extend(reason.map(|line| format!("{REASON_INDENT}{line}")));
+
+    lines
 }
 
 /// Why no place took the run: either none holds the project, or the ones that do are behind the disk
@@ -255,7 +268,7 @@ fn tidy<'a>(failure: &'a Failure, sources: &Sources) -> &'a str {
 }
 
 /// Leaves out whatever there is none of, but always says something
-fn counts(parts: &[(usize, &str, Style)]) -> String {
+pub fn counts(parts: &[(usize, &str, Style)]) -> String {
     let shown: Vec<String> = parts
         .iter()
         .filter(|(count, _, _)| *count > 0)
@@ -273,14 +286,14 @@ fn plural(count: usize, noun: &str) -> String {
     format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 
-const fn badge(text: AnsiColor, background: Color) -> Style {
+pub const fn badge(text: AnsiColor, background: Color) -> Style {
     Style::new()
         .fg_color(Some(Color::Ansi(text)))
         .bg_color(Some(background))
         .bold()
 }
 
-fn paint(style: Style, text: &str) -> String {
+pub fn paint(style: Style, text: &str) -> String {
     format!("{style}{text}{style:#}")
 }
 
@@ -319,6 +332,7 @@ mod tests {
         Run {
             specs: serde_json::from_str(results).unwrap(),
             appendix: appendix.map(str::to_owned),
+            failure: None,
         }
     }
 
@@ -453,6 +467,28 @@ Coverage
 ";
 
         assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn says_why_the_adapter_failed_the_run_under_the_counts() {
+        let results = r#"[{ "path": ["ReplicatedStorage", "Good.spec"], "tests": [{ "name": "works", "groups": [] }] }]"#;
+        let mut run = run(results, Some("Coverage 4%"));
+        run.failure = Some("coverage is under the floor
+of 5%
+".to_owned());
+
+        let expected = "
+  PASS    tests/Good.spec.luau  1 test
+
+Coverage 4%
+
+ Specs  1 passed
+ Tests  1 passed
+ Run    failed: coverage is under the floor
+                of 5%
+";
+
+        assert_eq!(plain_run(&run, None), expected);
     }
 
     #[test]

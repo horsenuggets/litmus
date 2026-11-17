@@ -1,4 +1,6 @@
 use crate::luau;
+use crate::progress::{Display, Event};
+use crate::selection::Selection;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -6,21 +8,30 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const HARNESS: &str = include_str!("standalone/harness.luau");
 
 const FOLDER: &str = ".litmus";
 const SCRIPT: &str = "run.luau";
 const MARKER: &str = "@@litmus-run@@";
+const PROGRESS_MARKER: &str = "@@litmus-progress@@";
 const BUDGET: Duration = Duration::from_secs(300);
+const TICK: Duration = Duration::from_millis(100);
 
 const SPEC_ENDINGS: [&str; 2] = [".spec.luau", ".spec.lua"];
 const MODULE_ENDINGS: [&str; 2] = [".luau", ".lua"];
 const SHIPPED_ADAPTER: &str = "Adapter/Lune";
 const OWN_OPTIONS: [&str; 5] = ["plugin", "cloud", "standalone", "help", "version"];
+
+#[derive(Debug, PartialEq)]
+enum Message {
+    Printed(String),
+    Event(Event),
+    Reported(String),
+}
 
 #[derive(Deserialize, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -59,15 +70,17 @@ impl Runtime {
     }
 }
 
-pub fn run(project_dir: &Path, runtime: &Runtime, flags: &[String]) -> Result<Value, String> {
+pub fn run(project_dir: &Path, runtime: &Runtime, flags: &[String], selection: &Selection) -> Result<Value, String> {
     if let Some(flag) = flags.iter().find(|flag| !runtime.flags.contains(flag)) {
         return Err(format!("--{flag} isn't a flag litmus.toml lists under [standalone]"));
     }
 
-    let specs = find_specs(project_dir, &runtime.specs)?;
-    if specs.is_empty() {
+    let found = find_specs(project_dir, &runtime.specs)?;
+    if found.is_empty() {
         return Err("the project has no .spec files where litmus.toml says to look".to_owned());
     }
+
+    let specs = selection.narrow(found)?;
 
     let folder = project_dir.join(FOLDER);
     let script = harness(runtime, &specs, flags)?;
@@ -76,7 +89,7 @@ pub fn run(project_dir: &Path, runtime: &Runtime, flags: &[String]) -> Result<Va
         .and_then(|()| fs::write(folder.join(SCRIPT), script))
         .map_err(|error| format!("couldn't write {FOLDER}/{SCRIPT}: {error}"))?;
 
-    let reported = execute(project_dir, &runtime.run)?;
+    let reported = execute(project_dir, &runtime.run, &specs)?;
 
     serde_json::from_str(&reported).map_err(|error| format!("couldn't read what the run reported: {error}"))
 }
@@ -89,7 +102,7 @@ fn is_flag(flag: &str) -> bool {
     spelled && !flag.is_empty() && !flag.starts_with('-') && !OWN_OPTIONS.contains(&flag)
 }
 
-fn relative(path: &str) -> Result<String, String> {
+pub fn relative(path: &str) -> Result<String, String> {
     if path.starts_with(['/', '\\']) || path.contains(':') {
         return Err(format!("\"{path}\" has to be a path from the project's folder"));
     }
@@ -155,16 +168,33 @@ fn harness(runtime: &Runtime, specs: &[String], flags: &[String]) -> Result<Stri
         .map(|flag| format!("[{}] = true", luau::string(flag)))
         .collect();
 
-    Ok(format!(
-        "local litmus, adapter, options, MARKER = require({}), require({}), \
-         {{ lib = {}, specs = {{ {} }}, flags = {{ {} }} }}, {}\n{HARNESS}",
-        luau::string(&from_folder(&lib)),
-        luau::string(&from_folder(&adapter)),
-        luau::string(&lib),
-        specs.join(", "),
-        flags.join(", "),
-        luau::string(MARKER),
-    ))
+    let header = [
+        format!("local litmus = require({})", luau::string(&from_folder(&lib))),
+        format!("local adapter = require({})", luau::string(&from_folder(&adapter))),
+        String::new(),
+        format!("local marker = {}", luau::string(MARKER)),
+        format!("local progressMarker = {}", luau::string(PROGRESS_MARKER)),
+        String::new(),
+        "local options = {".to_owned(),
+        format!("    lib = {},", luau::string(&lib)),
+        String::new(),
+        format!("    specs = {},", table(&specs)),
+        String::new(),
+        format!("    flags = {},", table(&flags)),
+        "}".to_owned(),
+    ];
+
+    Ok(format!("{}\n\n{HARNESS}", header.join("\n")))
+}
+
+fn table(entries: &[String]) -> String {
+    if entries.is_empty() {
+        return "{}".to_owned();
+    }
+
+    let lines: Vec<String> = entries.iter().map(|entry| format!("        {entry},\n")).collect();
+
+    format!("{{\n{}    }}", lines.concat())
 }
 
 fn module(file: &str) -> &str {
@@ -178,7 +208,7 @@ fn from_folder(path: &str) -> String {
     format!("../{path}")
 }
 
-fn execute(project_dir: &Path, run: &[String]) -> Result<String, String> {
+fn execute(project_dir: &Path, run: &[String], specs: &[String]) -> Result<String, String> {
     let script = format!("{FOLDER}/{SCRIPT}");
     let shown = format!("{} {script}", run.join(" "));
 
@@ -198,41 +228,73 @@ fn execute(project_dir: &Path, run: &[String]) -> Result<String, String> {
     };
 
     let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let _ = sender.send(relay(BufReader::new(output), |line| println!("{line}")));
-    });
+    thread::spawn(move || relay(BufReader::new(output), |message| sender.send(message).is_ok()));
 
-    let Ok(reported) = receiver.recv_timeout(BUDGET) else {
-        let _ = child.kill();
-        let _ = child.wait();
+    let deadline = Instant::now() + BUDGET;
+    let mut display = Display::new(specs.to_vec());
 
-        return Err(format!("`{shown}` was stopped, still running after {} minutes", BUDGET.as_secs() / 60));
+    let reported = loop {
+        match receiver.recv_timeout(TICK) {
+            Ok(Message::Printed(line)) => display.print(&line),
+            Ok(Message::Event(event)) => display.take(event),
+            Ok(Message::Reported(results)) => break Some(results),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break None,
+        }
+
+        if Instant::now() >= deadline {
+            display.finish();
+
+            let _ = child.kill();
+            let _ = child.wait();
+
+            return Err(format!("`{shown}` was stopped, still running after {} minutes", BUDGET.as_secs() / 60));
+        }
+
+        display.refresh();
     };
 
-    let status = child
-        .wait()
-        .map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))?;
+    display.finish();
 
-    reported.ok_or_else(|| format!("`{shown}` ended without reporting any results ({status})"))
+    let Some(reported) = reported else {
+        let status = child
+            .wait()
+            .map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))?;
+
+        return Err(format!("`{shown}` ended without reporting any results ({status})"));
+    };
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    Ok(reported)
 }
 
-fn relay(mut output: impl BufRead, mut pass: impl FnMut(&str)) -> Option<String> {
-    let mut reported = None;
+fn relay(mut output: impl BufRead, mut pass: impl FnMut(Message) -> bool) {
     let mut line = Vec::new();
 
     while output.read_until(b'\n', &mut line).is_ok_and(|read| read > 0) {
         let text = String::from_utf8_lossy(&line);
-        let text = text.trim_end_matches(['\n', '\r']);
+        let message = read(text.trim_end_matches(['\n', '\r']));
+        let last = matches!(message, Some(Message::Reported(_)));
 
-        match text.strip_prefix(MARKER) {
-            Some(results) => reported = Some(results.to_owned()),
-            None => pass(text),
+        if message.is_some_and(|message| !pass(message)) || last {
+            return;
         }
 
         line.clear();
     }
+}
 
-    reported
+fn read(text: &str) -> Option<Message> {
+    if let Some(results) = text.strip_prefix(MARKER) {
+        return Some(Message::Reported(results.to_owned()));
+    }
+
+    match text.strip_prefix(PROGRESS_MARKER) {
+        Some(event) => serde_json::from_str(event).ok().map(Message::Event),
+        None => Some(Message::Printed(text.to_owned())),
+    }
 }
 
 #[cfg(test)]
@@ -325,17 +387,30 @@ mod tests {
     fn the_harness_starts_by_requiring_the_lib_and_its_lune_adapter() {
         let specs = ["tests/a.spec.luau".to_owned(), "tests/b \"c\".spec.luau".to_owned()];
         let script = harness(&runtime(), &specs, &["coverage".to_owned()]).unwrap();
-        let first = script.lines().next().unwrap();
 
-        assert_eq!(
-            first,
-            "local litmus, adapter, options, MARKER = \
-             require(\"../submodules/litmus/lib\"), require(\"../submodules/litmus/lib/Adapter/Lune\"), \
-             { lib = \"submodules/litmus/lib\", \
-             specs = { \"tests/a.spec.luau\", \"tests/b \\034c\\034.spec.luau\" }, \
-             flags = { [\"coverage\"] = true } }, \"@@litmus-run@@\""
-        );
-        assert!(script.ends_with("print(MARKER .. encode(litmus.run(adapter(options))))\n"), "{script}");
+        let header = r#"local litmus = require("../submodules/litmus/lib")
+local adapter = require("../submodules/litmus/lib/Adapter/Lune")
+
+local marker = "@@litmus-run@@"
+local progressMarker = "@@litmus-progress@@"
+
+local options = {
+    lib = "submodules/litmus/lib",
+
+    specs = {
+        "tests/a.spec.luau",
+        "tests/b \034c\034.spec.luau",
+    },
+
+    flags = {
+        ["coverage"] = true,
+    },
+}
+
+"#;
+
+        assert!(script.starts_with(header), "{script}");
+        assert!(script.ends_with("print(marker .. encode(litmus.run(adapter(options), report)))\n"), "{script}");
     }
 
     #[test]
@@ -347,10 +422,12 @@ mod tests {
         };
 
         let script = harness(&runtime, &[], &[]).unwrap();
-        let first = script.lines().next().unwrap();
 
-        assert!(first.contains("require(\"../../shared/lib\"), require(\"../tools/adapter\"), "), "{first}");
-        assert!(first.contains("{ lib = \"../shared/lib\", specs = {  }, flags = {  } }"), "{first}");
+        let requires = "local litmus = require(\"../../shared/lib\")\nlocal adapter = require(\"../tools/adapter\")\n";
+        let options = "local options = {\n    lib = \"../shared/lib\",\n\n    specs = {},\n\n    flags = {},\n}\n";
+
+        assert!(script.starts_with(requires), "{script}");
+        assert!(script.contains(options), "{script}");
     }
 
     #[test]
@@ -399,32 +476,71 @@ mod tests {
 
     #[test]
     fn refuses_a_flag_the_project_never_listed() {
-        let problem = run(Path::new("a folder that doesn't exist"), &runtime(), &["verbose".to_owned()]).unwrap_err();
+        let problem = run(Path::new("a folder that doesn't exist"), &runtime(), &["verbose".to_owned()], &Selection::default())
+            .unwrap_err();
 
         assert!(problem.contains("--verbose"), "{problem}");
     }
 
-    #[test]
-    fn keeps_the_marked_line_and_passes_the_rest_on() {
-        let output = "first\r\n@@litmus-run@@{\"specs\":[]}\nlast";
+    fn relayed(output: &str) -> Vec<Message> {
         let mut passed = Vec::new();
 
-        let reported = relay(Cursor::new(output), |line| passed.push(line.to_owned()));
+        relay(Cursor::new(output), |message| {
+            passed.push(message);
+            true
+        });
 
-        assert_eq!(reported, Some("{\"specs\":[]}".to_owned()));
-        assert_eq!(passed, ["first", "last"]);
+        passed
+    }
+
+    fn printed(line: &str) -> Message {
+        Message::Printed(line.to_owned())
+    }
+
+    #[test]
+    fn passes_lines_on_until_the_results_and_reads_no_further() {
+        let passed = relayed("first\r\nsecond\n@@litmus-run@@{\"specs\":[]}\nlast");
+
+        assert_eq!(
+            passed,
+            [printed("first"), printed("second"), Message::Reported("{\"specs\":[]}".to_owned())]
+        );
+    }
+
+    #[test]
+    fn tells_a_line_of_progress_from_one_a_spec_printed() {
+        let passed = relayed("@@litmus-progress@@{\"kind\":\"settled\"}\nprinted\n");
+
+        assert_eq!(passed, [Message::Event(Event::Settled), printed("printed")]);
+    }
+
+    #[test]
+    fn drops_a_line_of_progress_it_cannot_read() {
+        assert_eq!(relayed("@@litmus-progress@@{\"kind\":\"unheard-of\"}\nprinted\n"), [printed("printed")]);
     }
 
     #[test]
     fn a_run_that_printed_no_marked_line_reported_nothing() {
-        assert_eq!(relay(Cursor::new("only a print\n"), |_| ()), None);
-        assert_eq!(relay(Cursor::new(""), |_| ()), None);
+        assert_eq!(relayed("only a print\n"), [printed("only a print")]);
+        assert_eq!(relayed(""), []);
+    }
+
+    #[test]
+    fn stops_reading_once_nobody_takes_what_it_passes_on() {
+        let mut passed = 0;
+
+        relay(Cursor::new("first\nsecond\n"), |_| {
+            passed += 1;
+            false
+        });
+
+        assert_eq!(passed, 1);
     }
 
     #[test]
     fn a_command_that_cannot_start_is_named() {
         let run = ["litmus-no-such-command".to_owned(), "run".to_owned()];
-        let problem = execute(Path::new("."), &run).unwrap_err();
+        let problem = execute(Path::new("."), &run, &[]).unwrap_err();
 
         assert!(problem.contains("`litmus-no-such-command run .litmus/run.luau`"), "{problem}");
     }
@@ -438,12 +554,33 @@ mod tests {
             ..runtime()
         };
 
-        let reported = run(&dir, &runtime, &[]);
+        let reported = run(&dir, &runtime, &[], &Selection::default());
         let written = fs::read_to_string(dir.join(".litmus/run.luau"));
         fs::remove_dir_all(&dir).unwrap();
 
         assert_eq!(reported, Ok(serde_json::json!({ "specs": [] })));
         assert!(written.unwrap().contains("\"tests/a.spec.luau\""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_run_is_over_once_it_reported_even_if_the_command_goes_on() {
+        let dir = project("lingers", &["tests/a.spec.luau"]);
+        let runtime = Runtime {
+            run: vec![
+                "sh".to_owned(),
+                "-c".to_owned(),
+                "echo '@@litmus-run@@{\"specs\":[]}'; exec sleep 60".to_owned(),
+            ],
+            ..runtime()
+        };
+
+        let started = std::time::Instant::now();
+        let reported = run(&dir, &runtime, &[], &Selection::default());
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(reported, Ok(serde_json::json!({ "specs": [] })));
+        assert!(started.elapsed() < Duration::from_secs(30), "{:?}", started.elapsed());
     }
 
     #[cfg(unix)]
@@ -455,7 +592,7 @@ mod tests {
             ..runtime()
         };
 
-        let problem = run(&dir, &runtime, &[]).unwrap_err();
+        let problem = run(&dir, &runtime, &[], &Selection::default()).unwrap_err();
         fs::remove_dir_all(&dir).unwrap();
 
         assert!(problem.contains("without reporting any results"), "{problem}");

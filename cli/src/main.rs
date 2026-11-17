@@ -3,15 +3,18 @@ mod config;
 mod luau;
 mod manifest;
 mod plugin;
+mod progress;
 mod report;
 mod results;
+mod selection;
 mod server;
 mod standalone;
 
 use config::Config;
 use manifest::Manifest;
 use report::Sources;
-use results::{Run, Tally};
+use results::Run;
+use selection::Selection;
 use serde_json::Value;
 use server::{Outcome, Server, Timeouts};
 use std::env;
@@ -28,7 +31,8 @@ Runs a project's tests, in Roblox Studio or wherever litmus.toml says
 Usage: litmus <command>
 
 Commands:
-  test                Run the project's .spec files in an open Studio place
+  test [paths]        Run the project's .spec files in an open Studio place; with paths, only the ones at or
+                      under those files and folders
   plugin install      Install the Studio plugin, replacing any copy installed before
   plugin uninstall    Remove the Studio plugin
 
@@ -40,6 +44,8 @@ Options for test:
   --<flag>            A flag of the project's own for its adapter, with --standalone
 
 litmus.toml:
+  [rojo]              The Rojo project a plugin or cloud run reads the place from, as `project`, when it isn't
+                      the default one
   [cloud]             The experience and its place, as `universe` and `place`; and as `build`, a .rbxl to use as
                       the new version, when Rojo alone doesn't build the whole place
   [standalone]        The command that runs a Luau file, as `run`; the folder of litmus's lib, as `lib`; where to
@@ -76,6 +82,7 @@ impl Backend {
 struct Test {
     backend: Backend,
     flags: Vec<String>,
+    paths: Vec<String>,
 }
 
 impl Test {
@@ -83,9 +90,17 @@ impl Test {
     fn parse(options: &[&str]) -> Option<Test> {
         let mut backend = None;
         let mut flags = Vec::new();
+        let mut paths = Vec::new();
 
         for option in options {
-            let name = option.strip_prefix("--")?;
+            let Some(name) = option.strip_prefix("--") else {
+                if option.starts_with('-') {
+                    return None;
+                }
+
+                paths.push((*option).to_owned());
+                continue;
+            };
 
             match Backend::named(name) {
                 Some(named) if backend.is_none() => backend = Some(named),
@@ -98,6 +113,7 @@ impl Test {
         Some(Test {
             backend: backend.unwrap_or(Backend::Plugin),
             flags,
+            paths,
         })
     }
 }
@@ -168,7 +184,7 @@ fn main() -> ExitCode {
     }
 }
 
-/// Whether every spec loaded and every test passed
+/// Whether every spec loaded, every test passed and the adapter failed nothing
 fn test(asked: &Test) -> Result<bool, String> {
     let project_dir = Path::new(".");
 
@@ -180,9 +196,11 @@ fn test(asked: &Test) -> Result<bool, String> {
         ));
     }
 
+    let selection = Selection::of(&asked.paths)?;
+
     let ran = match asked.backend {
-        Backend::Standalone => run_standalone(project_dir, &asked.flags)?,
-        Backend::Plugin | Backend::Cloud => run_in_place(project_dir, &asked.backend)?,
+        Backend::Standalone => run_standalone(project_dir, &asked.flags, &selection)?,
+        Backend::Plugin | Backend::Cloud => run_in_place(project_dir, &asked.backend, &selection)?,
     };
 
     let run: Run = serde_json::from_value(ran.results)
@@ -193,28 +211,33 @@ fn test(asked: &Test) -> Result<bool, String> {
 
     anstream::print!("{}", report::render(&run, &ran.sources, columns));
 
-    Ok(Tally::of(&run.specs).passed())
+    Ok(run.passed())
 }
 
-fn run_standalone(project_dir: &Path, flags: &[String]) -> Result<Ran, String> {
+fn run_standalone(project_dir: &Path, flags: &[String], selection: &Selection) -> Result<Ran, String> {
     let runtime = Config::read(project_dir)?.standalone()?;
 
     Ok(Ran {
-        results: standalone::run(project_dir, &runtime, flags)?,
+        results: standalone::run(project_dir, &runtime, flags, selection)?,
         sources: Sources::Disk,
     })
 }
 
-fn run_in_place(project_dir: &Path, backend: &Backend) -> Result<Ran, String> {
-    let manifest = Manifest::read(project_dir)?;
+fn run_in_place(project_dir: &Path, backend: &Backend, selection: &Selection) -> Result<Ran, String> {
+    let config = Config::read(project_dir)?;
+    let rojo_project = config.rojo_project();
+
+    let mut manifest = Manifest::read(project_dir, rojo_project.as_deref())?;
     if manifest.specs().is_empty() {
         return Err("the project has no .spec files".to_owned());
     }
 
+    manifest.narrow(selection)?;
+
     let results = match backend {
         Backend::Cloud => {
-            let place = Config::read(project_dir)?.cloud()?;
-            cloud::run(project_dir, &manifest, &place)?
+            let place = config.cloud()?;
+            cloud::run(project_dir, &manifest, &place, rojo_project.as_deref())?
         }
         _ => run_with_plugin(&manifest)?,
     };
@@ -247,9 +270,14 @@ mod tests {
     use super::*;
 
     fn test_on(backend: Backend, flags: &[&str]) -> Option<Command> {
+        test_of(backend, flags, &[])
+    }
+
+    fn test_of(backend: Backend, flags: &[&str], paths: &[&str]) -> Option<Command> {
         Some(Command::Test(Test {
             backend,
             flags: flags.iter().map(|flag| (*flag).to_owned()).collect(),
+            paths: paths.iter().map(|path| (*path).to_owned()).collect(),
         }))
     }
 
@@ -269,7 +297,15 @@ mod tests {
         assert_eq!(Command::parse(&[] as &[&str]), None);
         assert_eq!(Command::parse(&["run"]), None);
         assert_eq!(Command::parse(&["plugin"]), None);
-        assert_eq!(Command::parse(&["test", "extra"]), None);
+    }
+
+    #[test]
+    fn reads_the_paths_a_test_run_names() {
+        assert_eq!(Command::parse(&["test", "tests/deep"]), test_of(Backend::Plugin, &[], &["tests/deep"]));
+        assert_eq!(
+            Command::parse(&["test", "a.spec.luau", "--standalone", "--coverage", "tests"]),
+            test_of(Backend::Standalone, &["coverage"], &["a.spec.luau", "tests"])
+        );
     }
 
     #[test]
@@ -292,7 +328,6 @@ mod tests {
     fn refuses_options_that_do_not_add_up() {
         assert_eq!(Command::parse(&["test", "--cloud", "--standalone"]), None);
         assert_eq!(Command::parse(&["test", "--plugin", "--plugin"]), None);
-        assert_eq!(Command::parse(&["test", "--standalone", "coverage"]), None);
         assert_eq!(Command::parse(&["test", "-c"]), None);
         assert_eq!(Command::parse(&["test", "--"]), None);
     }
@@ -302,6 +337,7 @@ mod tests {
         let asked = Test {
             backend: Backend::Cloud,
             flags: vec!["coverage".to_owned()],
+            paths: vec![],
         };
 
         let problem = test(&asked).unwrap_err();

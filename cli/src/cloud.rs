@@ -32,13 +32,13 @@ pub struct Place {
 }
 
 /// Runs the project's specs in a version of the place saved for this run, and returns the results as the lib wrote them
-pub fn run(project_dir: &Path, manifest: &Manifest, place: &Place) -> Result<Value, String> {
+pub fn run(project_dir: &Path, manifest: &Manifest, place: &Place, rojo_project: Option<&Path>) -> Result<Value, String> {
     let client = Client::new(key(project_dir)?);
 
     let file = match &place.build {
         // Taken at its word: nothing checks that it holds the code on disk, as the hashes do for a place in Studio
         Some(build) => place::read(&project_dir.join(build))?,
-        None => place::build(project_dir)?,
+        None => place::build(project_dir, rojo_project)?,
     };
 
     let version = client.upload(place, &file)?;
