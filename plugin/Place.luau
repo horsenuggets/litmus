@@ -7,8 +7,8 @@ export type Comparison = {
     differing: { bridge.Path },
 }
 
-local function descend(root: Instance, path: bridge.Path): Instance?
-    local current: Instance? = root
+local function find(path: bridge.Path): Instance?
+    local current: Instance? = game
 
     for _, name in path do
         if not current then
@@ -46,16 +46,12 @@ end
 
 local place = {}
 
-function place.find(path: bridge.Path): Instance?
-    return descend(game, path)
-end
-
 -- The instances at `paths`, leaving out any this place doesn't have
 function place.findAll(paths: { bridge.Path }): { Instance }
     local found: { Instance } = {}
 
     for _, path in paths do
-        local instance: Instance? = place.find(path)
+        local instance: Instance? = find(path)
         if instance then
             table.insert(found, instance)
         end
@@ -66,7 +62,7 @@ end
 
 -- The source of the script at `path`, if this place has one there
 function place.sourceAt(path: bridge.Path): string?
-    local instance: Instance? = place.find(path)
+    local instance: Instance? = find(path)
     return instance and sourceOf(instance)
 end
 
@@ -75,7 +71,7 @@ function place.compare(files: { bridge.File }): Comparison
     local comparison: Comparison = { missing = {}, differing = {} }
 
     for _, file in files do
-        local instance: Instance? = place.find(file.path)
+        local instance: Instance? = find(file.path)
         if not instance then
             table.insert(comparison.missing, file.path)
             continue
