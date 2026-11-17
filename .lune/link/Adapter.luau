@@ -55,8 +55,9 @@ local function grow(place: Place, node: Node, instance: any): ()
     end
 
     for _, child in node.children or {} do
-        local grown: any = roblox.Instance.new(child.className)
+        local grown: any = (roblox :: any).Instance.new(child.className)
         grow(place, child, grown)
+
         grown.Parent = instance
     end
 end
@@ -64,6 +65,7 @@ end
 local function placeFrom(root: Node): Place
     local place: Place = {
         game = roblox.Instance.new("DataModel"),
+
         files = {},
         scripts = {},
     }
@@ -85,16 +87,18 @@ end
 local function globalsOf(place: Place): { [string]: any }
     local globals: { [string]: any } = {
         game = place.game,
+
         Instance = roblox.Instance,
         task = task,
     }
 
     globals.loadstring = function(source: string, name: string): (Chunk?, string?)
-        local compiled: boolean, chunk: any = pcall(luau.load, source, {
+        local loadOptions: luau.LoadOptions = {
             debugName = name,
             environment = globals,
-        })
+        }
 
+        local compiled: boolean, chunk: any = pcall(luau.load, source, loadOptions)
         if not compiled then
             return nil, compileProblem(chunk)
         end
@@ -120,10 +124,12 @@ local function hostOf(place: Place, lib: any): any
         return globals.loadstring(source, name)
     end
 
-    return luau.load(lib.Adapter.Roblox.Source, {
+    local exec = luau.load(lib.Adapter.Roblox.Source, {
         debugName = `={LIB_CHUNKS}Adapter/Roblox`,
         environment = shared,
-    })()
+    })
+    
+    return exec()
 end
 
 local function scriptAt(place: Place, file: string): any
