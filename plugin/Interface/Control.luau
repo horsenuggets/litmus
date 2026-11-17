@@ -1,6 +1,6 @@
 local checkbox = require("./Components/Checkbox")
 local flux = require("../Packages/Flux")
-local header = require("./Components/Header")
+local imageIds = require("../ImageIds")
 local label = require("./Components/Label")
 local textButton = require("./Components/TextButton")
 local theme = require("./Theme")
@@ -21,6 +21,10 @@ export type Props = {
 
 local PADDING: number = 20
 local GAP: number = 10
+
+local HEADER_HEIGHT: number = 32
+local HEADER_GAP: number = 8
+local LOGO_SIZE: number = 28
 
 local CONNECT_ROW_HEIGHT: number = 36
 local BUTTON_ROW_HEIGHT: number = 34
@@ -60,7 +64,39 @@ local function control(scope: flux.Scope, props: Props): Frame
                 Padding = UDim.new(0, GAP),
             },
 
-            header(scope, { layoutOrder = 1 }),
+            scope:element "Frame" {
+                Name = "Header",
+                LayoutOrder = 1,
+
+                Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
+
+                scope:element "UIListLayout" {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    VerticalAlignment = Enum.VerticalAlignment.Center,
+                    Padding = UDim.new(0, HEADER_GAP),
+                },
+
+                scope:element "ImageLabel" {
+                    Name = "Logo",
+                    LayoutOrder = 1,
+
+                    Size = UDim2.fromOffset(LOGO_SIZE, LOGO_SIZE),
+
+                    -- `icon` is drawn to show on a dark background, and `darkIcon` on a light one
+                    Image = scope:computed(function(use: flux.Use): string
+                        return if use(colors.isDark) then imageIds.icon else imageIds.darkIcon
+                    end),
+                },
+
+                label(scope, {
+                    layoutOrder = 2,
+
+                    text = "Litmus",
+                    font = theme.boldFont,
+                    size = theme.titleTextSize,
+                    color = colors.brightText,
+                }),
+            },
 
             scope:element "Frame" {
                 Name = "Connect",
