@@ -16,6 +16,11 @@ local CODE_SERVICES: { string } = {
     "StarterPlayer",
 }
 
+type LibRun = {
+    specs: { outcome.SpecResult },
+    appendix: string?,
+}
+
 local NO_SPECS: string = "This place has no .spec modules to run."
 local BUSY: string = "Another run is still going."
 
@@ -41,7 +46,7 @@ local function folderIn(parent: Instance, name: string): Instance
 end
 
 -- Goes through the place's own copy of the lib, so the specs and the runner share one
-local function runThroughLib(roots: { Instance }): { outcome.SpecResult }
+local function runThroughLib(roots: { Instance }): LibRun
     local lib: ModuleScript = moduleIn(replicatedStorage, LIB_NAME)
     local entry: ModuleScript = moduleIn(folderIn(lib, "Adapter"), "Roblox")
 
@@ -71,7 +76,9 @@ function run.specs(roots: { Instance }): outcome.Run
         return { kind = "problem", message = tostring(result) }
     end
 
-    return { kind = "results", results = result }
+    local ran: LibRun = result
+
+    return { kind = "results", results = ran.specs, appendix = ran.appendix }
 end
 
 -- Runs every spec the place has, for a run nobody handed a list to

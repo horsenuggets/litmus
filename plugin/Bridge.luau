@@ -23,7 +23,7 @@ export type Offer = {
 local PORTS: { number } = { 37100, 37101 }
 
 -- Raised whenever the plugin and the CLI would stop understanding each other
-local PROTOCOL: number = 1
+local PROTOCOL: number = 2
 
 type Method = "GET" | "POST"
 

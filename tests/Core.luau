@@ -156,7 +156,7 @@ if not chunk then
     error(`[Core]: {entry:GetFullName()} didn't compile: {problem}`, 0)
 end
 
-local results: { SpecResult } = chunk().run(lib, { spec })
+local results: { SpecResult } = chunk().run(lib, { spec }).specs
 copies:Destroy()
 
 compare("run", "spec count", #results, 1)

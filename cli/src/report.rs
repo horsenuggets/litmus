@@ -1,5 +1,5 @@
 use crate::manifest::Manifest;
-use crate::results::{Failure, SpecResult, Tally};
+use crate::results::{Failure, Run, SpecResult, Tally};
 use crate::server::Mismatch;
 use anstyle::{AnsiColor, Color, RgbColor, Style};
 use std::collections::HashMap;
@@ -35,7 +35,9 @@ const MAX_LISTED: usize = 10;
 type Files<'a> = HashMap<&'a [String], &'a Path>;
 
 /// `columns` is how wide the terminal is, or nothing when the text isn't going to one
-pub fn render(results: &[SpecResult], manifest: &Manifest, columns: Option<usize>) -> String {
+pub fn render(run: &Run, manifest: &Manifest, columns: Option<usize>) -> String {
+    let results = &run.specs;
+
     let files: Files = manifest
         .scripts
         .iter()
@@ -65,6 +67,11 @@ pub fn render(results: &[SpecResult], manifest: &Manifest, columns: Option<usize
     }
 
     if !results.is_empty() {
+        lines.push(String::new());
+    }
+
+    if let Some(appendix) = &run.appendix {
+        lines.extend(appendix.trim_end().lines().map(str::to_owned));
         lines.push(String::new());
     }
 
@@ -289,8 +296,18 @@ mod tests {
     }
 
     fn plain_at(results: &str, columns: Option<usize>) -> String {
-        let results: Vec<SpecResult> = serde_json::from_str(results).unwrap();
-        anstream::adapter::strip_str(&render(&results, &manifest(), columns)).to_string()
+        plain_run(&run(results, None), columns)
+    }
+
+    fn run(results: &str, appendix: Option<&str>) -> Run {
+        Run {
+            specs: serde_json::from_str(results).unwrap(),
+            appendix: appendix.map(str::to_owned),
+        }
+    }
+
+    fn plain_run(run: &Run, columns: Option<usize>) -> String {
+        anstream::adapter::strip_str(&render(run, &manifest(), columns)).to_string()
     }
 
     #[test]
@@ -369,9 +386,8 @@ mod tests {
             ],
         };
 
-        let results: Vec<SpecResult> =
-            serde_json::from_str(r#"[{ "path": ["Shared", "Util", "spec"], "tests": [] }]"#).unwrap();
-        let text = anstream::adapter::strip_str(&render(&results, &manifest, None)).to_string();
+        let run = run(r#"[{ "path": ["Shared", "Util", "spec"], "tests": [] }]"#, None);
+        let text = anstream::adapter::strip_str(&render(&run, &manifest, None)).to_string();
 
         assert!(text.contains("src/Util/spec.luau"), "{text}");
     }
@@ -403,6 +419,38 @@ mod tests {
 ";
 
         assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn shows_what_the_adapter_added_between_the_specs_and_the_counts() {
+        let results = r#"[{ "path": ["ReplicatedStorage", "Good.spec"], "tests": [{ "name": "works", "groups": [] }] }]"#;
+        let text = plain_run(&run(results, Some("Coverage
+  src/Helper.luau  87%
+")), None);
+
+        let expected = "
+  PASS    tests/Good.spec.luau  1 test
+
+Coverage
+  src/Helper.luau  87%
+
+ Specs  1 passed
+ Tests  1 passed
+";
+
+        assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn shows_what_the_adapter_added_when_no_spec_ran() {
+        let text = plain_run(&run("[]", Some("nothing to cover")), None);
+
+        assert_eq!(text, "
+nothing to cover
+
+ Specs  none
+ Tests  none
+");
     }
 
     #[test]

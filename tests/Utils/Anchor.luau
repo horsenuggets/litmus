@@ -35,10 +35,10 @@ function anchor.run(folder: string, name: string): litmus.SpecResult
         error(`[Anchor]: {entry:GetFullName()} didn't compile: {problem}`, 0)
     end
 
-    local results: { litmus.SpecResult } = chunk().run(lib, { spec })
+    local ran: litmus.Run = chunk().run(lib, { spec })
     copies:Destroy()
 
-    return results[1]
+    return ran.specs[1]
 end
 
 function anchor.test(ran: litmus.SpecResult, name: string): litmus.TestResult

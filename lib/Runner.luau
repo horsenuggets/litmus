@@ -33,6 +33,12 @@ export type Adapter = {
     specs: { Spec },
     locate: (chunk: string) -> { string }?,
     spawn: (run: (() -> ()) | thread) -> (),
+    results: ((specs: { SpecResult }) -> string?)?,
+}
+
+export type Run = {
+    specs: { SpecResult },
+    appendix: string?,
 }
 
 -- A failure knows its script only by the name the chunk ran under, which the adapter turns back into the script
@@ -105,7 +111,7 @@ end
 local runner = {}
 
 -- The adapter's specs must require this copy of the lib, or they register with another
-function runner.run(adapter: Adapter): { SpecResult }
+function runner.run(adapter: Adapter): Run
     local results: { SpecResult } = {}
     local running: Running = { count = 0, waiter = nil }
 
@@ -115,7 +121,12 @@ function runner.run(adapter: Adapter): { SpecResult }
 
     waitFor(running)
 
-    return results
+    local describe: ((specs: { SpecResult }) -> string?)? = adapter.results
+
+    return {
+        specs = results,
+        appendix = if describe then describe(results) else nil,
+    }
 end
 
 return runner

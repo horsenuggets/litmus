@@ -7,6 +7,7 @@ export type TestResult = runner.TestResult
 export type SpecResult = runner.SpecResult
 export type Spec = runner.Spec
 export type Adapter = runner.Adapter
+export type Run = runner.Run
 
 local litmus = {
     test = collector.test,

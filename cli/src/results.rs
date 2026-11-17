@@ -24,6 +24,12 @@ pub struct SpecResult {
     pub failure: Option<Failure>,
 }
 
+#[derive(Deserialize)]
+pub struct Run {
+    pub specs: Vec<SpecResult>,
+    pub appendix: Option<String>,
+}
+
 impl SpecResult {
     pub fn failed_tests(&self) -> impl Iterator<Item = (&TestResult, &Failure)> {
         self.tests

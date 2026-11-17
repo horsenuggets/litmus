@@ -8,7 +8,7 @@ mod server;
 
 use config::Config;
 use manifest::Manifest;
-use results::{SpecResult, Tally};
+use results::{Run, Tally};
 use serde_json::Value;
 use server::{Outcome, Server, Timeouts};
 use std::env;
@@ -153,15 +153,15 @@ fn test(target: &Target) -> Result<bool, String> {
         }
     };
 
-    let results: Vec<SpecResult> = serde_json::from_value(results)
+    let run: Run = serde_json::from_value(results)
         .map_err(|error| format!("couldn't read the results, so the place's lib may not match this CLI: {error}"))?;
 
     // Asked of stdout alone, so output sent to a file or another program is never wrapped
     let columns = terminal_size_of(io::stdout()).map(|(Width(columns), _)| usize::from(columns));
 
-    anstream::print!("{}", report::render(&results, &manifest, columns));
+    anstream::print!("{}", report::render(&run, &manifest, columns));
 
-    Ok(Tally::of(&results).passed())
+    Ok(Tally::of(&run.specs).passed())
 }
 
 /// The results as the lib wrote them, from whichever open place holds the project
