@@ -1,6 +1,14 @@
 -- The lib tags its own errors with this, which says nothing once the plugin is the one showing them
 local LIB_TAG: string = "[Litmus]: "
 
+local ESCAPES: { [string]: string } = {
+    ["&"] = "&amp;",
+    ["<"] = "&lt;",
+    [">"] = "&gt;",
+    ['"'] = "&quot;",
+    ["'"] = "&apos;",
+}
+
 local words = {}
 
 function words.untagged(message: string): string
@@ -13,6 +21,10 @@ end
 
 function words.plain(text: string): string
     return (string.gsub(text, "\27%[[%d;]*m", ""))
+end
+
+function words.escaped(text: string): string
+    return (string.gsub(text, "[&<>\"']", ESCAPES))
 end
 
 function words.plural(count: number, noun: string): string

@@ -6,6 +6,8 @@ export type Props = {
     size: number,
     color: flux.UsedAs<Color3>,
 
+    richText: boolean?,
+
     layoutOrder: number?,
 }
 
@@ -21,6 +23,7 @@ local function wrappedText(scope: flux.Scope, props: Props): TextLabel
         Size = UDim2.fromScale(1, 0),
 
         Text = props.text,
+        RichText = props.richText,
         TextScaled = false,
         TextSize = props.size,
         FontFace = props.font,

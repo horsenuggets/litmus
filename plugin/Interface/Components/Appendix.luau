@@ -19,14 +19,18 @@ local TOP: number = 10
 local GAP: number = 8
 local LINE: number = 1
 
-local STAT_GAP: number = 8
+local HEADING_TOP: number = 12
+local HEADING_BOTTOM: number = 4
+
+local KEY_HEIGHT: number = 18
 local KEY_GAP: number = 14
-local SWATCH_SIZE: UDim2 = UDim2.fromOffset(12, 6)
+local SWATCH_WIDTH: number = 14
+local SWATCH_HEIGHT: number = 8
 
 local function appendix(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
 
-    local function padded(position: number, name: string, children: any): Frame
+    local function padded(position: number, name: string, children: any, top: number?, bottom: number?): Frame
         return scope:element "Frame" {
             Name = name,
             LayoutOrder = position,
@@ -37,6 +41,8 @@ local function appendix(scope: flux.Scope, props: Props): Frame
             scope:element "UIPadding" {
                 PaddingLeft = UDim.new(0, theme.rowPadding),
                 PaddingRight = UDim.new(0, theme.rowPadding),
+                PaddingTop = UDim.new(0, top or 0),
+                PaddingBottom = UDim.new(0, bottom or 0),
             },
 
             children,
@@ -44,12 +50,14 @@ local function appendix(scope: flux.Scope, props: Props): Frame
     end
 
     local function heading(position: number, text: string): Frame
-        return padded(position, "Heading", label(scope, {
+        local shown: TextLabel = label(scope, {
             text = text,
             font = theme.boldFont,
             size = theme.bodyTextSize,
             color = colors.brightText,
-        }))
+        })
+
+        return padded(position, "Heading", shown, HEADING_TOP, HEADING_BOTTOM)
     end
 
     local function text(position: number, shown: string): Frame
@@ -69,36 +77,15 @@ local function appendix(scope: flux.Scope, props: Props): Frame
         }
 
         for index, item in items do
-            table.insert(lines, scope:element "Frame" {
-                Name = item.label,
-                LayoutOrder = index,
+            table.insert(lines, wrappedText(scope, {
+                layoutOrder = index,
+                richText = true,
 
-                AutomaticSize = Enum.AutomaticSize.XY,
-                Size = UDim2.new(),
-
-                scope:element "UIListLayout" {
-                    FillDirection = Enum.FillDirection.Horizontal,
-                    Padding = UDim.new(0, STAT_GAP),
-                },
-
-                label(scope, {
-                    layoutOrder = 1,
-
-                    text = item.label,
-                    font = theme.boldFont,
-                    size = theme.smallTextSize,
-                    color = colors.brightText,
-                }),
-
-                label(scope, {
-                    layoutOrder = 2,
-
-                    text = item.text,
-                    font = theme.mainFont,
-                    size = theme.smallTextSize,
-                    color = colors.text,
-                }),
-            })
+                text = `<b>{words.escaped(item.label)}</b>   {words.escaped(item.text)}`,
+                font = theme.mainFont,
+                size = theme.smallTextSize,
+                color = colors.text,
+            }))
         end
 
         return padded(position, "Stats", lines)
@@ -108,7 +95,6 @@ local function appendix(scope: flux.Scope, props: Props): Frame
         local keys: { Instance } = {
             scope:element "UIListLayout" {
                 FillDirection = Enum.FillDirection.Horizontal,
-                VerticalAlignment = Enum.VerticalAlignment.Center,
                 Padding = UDim.new(0, KEY_GAP),
                 Wraps = true,
             },
@@ -119,33 +105,41 @@ local function appendix(scope: flux.Scope, props: Props): Frame
                 Name = item.label,
                 LayoutOrder = index,
 
-                AutomaticSize = Enum.AutomaticSize.XY,
-                Size = UDim2.new(),
-
-                scope:element "UIListLayout" {
-                    FillDirection = Enum.FillDirection.Horizontal,
-                    VerticalAlignment = Enum.VerticalAlignment.Center,
-                    Padding = UDim.new(0, theme.rowGap),
-                },
+                AutomaticSize = Enum.AutomaticSize.X,
+                Size = UDim2.fromOffset(0, KEY_HEIGHT),
 
                 scope:element "Frame" {
                     Name = "Swatch",
-                    LayoutOrder = 1,
 
-                    Size = SWATCH_SIZE,
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Position = UDim2.fromScale(0, 0.5),
+                    Size = UDim2.fromOffset(SWATCH_WIDTH, SWATCH_HEIGHT),
 
                     BackgroundColor3 = tone.fill(colors, item.tone),
                     BackgroundTransparency = 0,
+
+                    scope:element "UICorner" { CornerRadius = UDim.new(1, 0) },
                 },
 
-                label(scope, {
-                    layoutOrder = 2,
+                scope:element "TextLabel" {
+                    Name = "Label",
 
-                    text = item.label,
-                    font = theme.mainFont,
-                    size = theme.smallTextSize,
-                    color = colors.subText,
-                }),
+                    AnchorPoint = Vector2.zero,
+                    Position = UDim2.new(),
+
+                    AutomaticSize = Enum.AutomaticSize.X,
+                    Size = UDim2.fromScale(0, 1),
+
+                    Text = item.label,
+                    TextScaled = false,
+                    TextSize = theme.smallTextSize,
+                    FontFace = theme.mainFont,
+                    TextColor3 = colors.subText,
+
+                    scope:element "UIPadding" {
+                        PaddingLeft = UDim.new(0, SWATCH_WIDTH + theme.rowGap),
+                    },
+                },
             })
         end
 
