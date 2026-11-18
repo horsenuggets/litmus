@@ -5,6 +5,11 @@ export type Caught = {
     trace: string,
 }
 
+type Position = {
+    chunk: string,
+    line: number,
+}
+
 local raised: { [any]: true } = setmetatable({}, { __mode = "k" }) :: any
 
 local OWN_SOURCE: string = debug.info(1, "s")
@@ -15,25 +20,29 @@ local function isLib(source: string): boolean
     return string.sub(source, 1, #LIB_PREFIX) == LIB_PREFIX
 end
 
-local function positionIn(message: string): (string?, number?)
-    local source: string?, line: string? = string.match(message, "^(.-):(%d+): ")
-    return source, tonumber(line)
+local function positionIn(message: string): Position?
+    local chunk: string?, line: string? = string.match(message, "^(.-):(%d+): ")
+    if not chunk then
+        return nil
+    end
+
+    return { chunk = chunk, line = tonumber(line) :: number }
 end
 
-local function findCaller(level: number, isProject: (chunk: string) -> boolean): (string?, number?)
+local function findCaller(level: number, isProject: (chunk: string) -> boolean): Position?
     level += 1
 
     local source: string, line: number = debug.info(level, "sl")
     while source ~= OWN_SOURCE do
         if line > 0 and not isLib(source) and isProject(source) then
-            return source, line
+            return { chunk = source, line = line }
         end
 
         level += 1
         source, line = debug.info(level, "sl")
     end
 
-    return nil, nil
+    return nil
 end
 
 local function describe(thrown: unknown, isProject: (chunk: string) -> boolean): Caught
@@ -50,15 +59,12 @@ local function describe(thrown: unknown, isProject: (chunk: string) -> boolean):
         source, line = debug.info(level, "sl")
     end
 
-    local callerSource: string?, callerLine: number? = findCaller(level, isProject)
-    if not callerSource then
-        callerSource, callerLine = positionIn(message)
-    end
+    local blamed: Position = findCaller(level, isProject) or positionIn(message) or { chunk = source, line = line }
 
     return {
         message = message,
-        chunk = callerSource or source,
-        line = callerLine or line,
+        chunk = blamed.chunk,
+        line = blamed.line,
         trace = debug.traceback(nil, level),
     }
 end
@@ -80,12 +86,16 @@ function failure.raise(message: string, level: number): never
 end
 
 function failure.catch(body: () -> (), isProject: (chunk: string) -> boolean): Caught?
-    local _: boolean, problem: Caught? = xpcall(function(): Caught?
+    local function attempt(): Caught?
         body()
         return nil
-    end, function(thrown: unknown): Caught
+    end
+
+    local function handle(thrown: unknown): Caught
         return describe(thrown, isProject)
-    end)
+    end
+
+    local _: boolean, problem: Caught? = xpcall(attempt, handle)
 
     return problem
 end
