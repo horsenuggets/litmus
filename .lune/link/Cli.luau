@@ -24,10 +24,6 @@ function cli.log(prefix: string, message: string): ()
     print(`[{prefix}]: {message}`)
 end
 
-function cli.warn(prefix: string, message: string): ()
-    stdio.ewrite(stdio.color("yellow") .. `[{prefix}]: {message}` .. stdio.color("reset") .. "\n")
-end
-
 function cli.success(prefix: string, message: string): ()
     print(stdio.color("green") .. `[{prefix}]: {message}` .. stdio.color("reset"))
 end
@@ -36,7 +32,7 @@ function cli.fail(prefix: string, message: string): never
     error(`[{prefix}]: {message}`, 0)
 end
 
-function cli.parseArgs(args: { string }): ParsedArgs
+local function parseArgs(args: { string }): ParsedArgs
     local positionals: { string } = {}
     local flags: { [string]: string | boolean } = {}
 
@@ -93,11 +89,8 @@ function cli.open(path: string): ()
 end
 
 function cli.main(command: (args: ParsedArgs) -> ()): ()
-    local parsed: ParsedArgs = cli.parseArgs(process.args)
-    local ok, result = pcall(function(): string?
-        command(parsed)
-        return nil
-    end)
+    local parsed: ParsedArgs = parseArgs(process.args)
+    local ok: boolean, result: unknown = pcall(command, parsed)
     if not ok then
         stdio.ewrite(stdio.color("red") .. tostring(result) .. stdio.color("reset") .. "\n")
         process.exit(1)

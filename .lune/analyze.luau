@@ -128,7 +128,12 @@ local function parseHeader(line: string): Problem?
     }
 end
 
-local function parseOutput(output: string): ({ Problem }, { string })
+type Parsed = {
+    problems: { Problem },
+    unparsed: { string },
+}
+
+local function parseOutput(output: string): Parsed
     local problems: { Problem } = {}
     local unparsed: { string } = {}
     local current: Problem? = nil
@@ -149,7 +154,7 @@ local function parseOutput(output: string): ({ Problem }, { string })
         end
     end
 
-    return problems, unparsed
+    return { problems = problems, unparsed = unparsed }
 end
 
 local function problemKey(problem: Problem): string
@@ -311,12 +316,12 @@ cli.main(function(args: cli.ParsedArgs): ()
         end
     end
 
-    local parsed: { Problem }, unparsed: { string } = parseOutput(table.concat(output, "\n"))
+    local parsed: Parsed = parseOutput(table.concat(output, "\n"))
 
-    local problems: { Problem } = distinct(parsed)
+    local problems: { Problem } = distinct(parsed.problems)
     table.sort(problems, comesBefore)
 
-    for _, line in unparsed do
+    for _, line in parsed.unparsed do
         print(line)
     end
 

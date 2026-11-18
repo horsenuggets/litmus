@@ -9,9 +9,7 @@ function rojo.serve(): ()
 
     cli.run("rojo", { "serve" }, { forward = true, check = false })
 
-    pcall(function()
-        watcher:kill()
-    end)
+    pcall(watcher.kill, watcher)
 end
 
 function rojo.build(output: string): ()
