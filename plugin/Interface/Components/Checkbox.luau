@@ -29,7 +29,7 @@ local function checkbox(scope: flux.Scope, props: Props): TextButton
 
     local pressing: flux.Value<boolean> = scope:value(false)
 
-    local rippleLayer: Frame, startRipple: (flux.Scope, GuiButton) -> () = ripple(scope, {
+    local press: ripple.Ripple = ripple(scope, {
         color = scope:computed(function(use: flux.Use): Color3
             return if use(props.checked) then theme.onBrand else use(colors.buttonHover)
         end),
@@ -51,7 +51,7 @@ local function checkbox(scope: flux.Scope, props: Props): TextButton
             end,
         }),
 
-        startRipple,
+        press.start,
 
         scope:element "Frame" {
             Name = "Outline",
@@ -86,7 +86,7 @@ local function checkbox(scope: flux.Scope, props: Props): TextButton
             transparency = transparency,
         })) { ZIndex = 4 },
 
-        scope:hydrate(rippleLayer) { ZIndex = 5 },
+        scope:hydrate(press.layer) { ZIndex = 5 },
     }
 end
 

@@ -39,7 +39,7 @@ local function textButton(scope: flux.Scope, props: Props): TextButton
     local hovering: flux.Value<boolean> = scope:value(false)
     local pressing: flux.Value<boolean> = scope:value(false)
 
-    local rippleLayer: Frame, startRipple: (flux.Scope, GuiButton) -> () = ripple(scope, {
+    local press: ripple.Ripple = ripple(scope, {
         color = fillColor,
         alpha = fillAlpha,
         pressing = pressing,
@@ -61,7 +61,7 @@ local function textButton(scope: flux.Scope, props: Props): TextButton
             end,
         }),
 
-        startRipple,
+        press.start,
 
         if solid
             then scope:element "Frame" {
@@ -112,7 +112,7 @@ local function textButton(scope: flux.Scope, props: Props): TextButton
             },
         },
 
-        scope:hydrate(rippleLayer) { ZIndex = 4 },
+        scope:hydrate(press.layer) { ZIndex = 4 },
 
         scope:element "Frame" {
             Name = "Notice",

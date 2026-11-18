@@ -7,6 +7,11 @@ export type Props = {
     pressing: flux.UsedAs<boolean>,
 }
 
+export type Ripple = {
+    layer: Frame,
+    start: (scope: flux.Scope, button: GuiButton) -> (),
+}
+
 local GROW_SPEED: number = 44
 local GROW_DAMPING: number = 2
 local FADE_SPEED: number = 31
@@ -16,7 +21,7 @@ local function reachFrom(point: Vector2, size: Vector2): number
     return furthest.Magnitude
 end
 
-local function ripple(scope: flux.Scope, props: Props): (Frame, (flux.Scope, GuiButton) -> ())
+local function ripple(scope: flux.Scope, props: Props): Ripple
     local origin: flux.Value<Vector2> = scope:value(Vector2.zero)
     local reach: flux.Value<number> = scope:value(0)
     local target: flux.Value<number> = scope:value(0)
@@ -70,7 +75,7 @@ local function ripple(scope: flux.Scope, props: Props): (Frame, (flux.Scope, Gui
         },
     }
 
-    return layer, start
+    return { layer = layer, start = start }
 end
 
 return ripple
