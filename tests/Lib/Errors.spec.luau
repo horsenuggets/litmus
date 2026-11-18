@@ -30,13 +30,13 @@ test("gives every failure a trace", function(): ()
 end)
 
 test("runs the tests after one that failed", function(): ()
-    expect.equal(anchor.resultOf(spec, "runs after earlier tests failed").failure, nil)
+    expect.truthy(anchor.passed(spec, "runs after earlier tests failed"))
 end)
 
 test("refuses a test registered while tests run", function(): ()
-    expect.equal(anchor.resultOf(spec, "refuses a test registered while tests run").failure, nil)
+    expect.truthy(anchor.passed(spec, "refuses a test registered while tests run"))
 end)
 
 test("refuses a group opened while tests run", function(): ()
-    expect.equal(anchor.resultOf(spec, "refuses a group opened while tests run").failure, nil)
+    expect.truthy(anchor.passed(spec, "refuses a group opened while tests run"))
 end)

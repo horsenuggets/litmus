@@ -1,26 +1,8 @@
+local inline = require("../Utils/Inline")
 local litmus = require("../../Litmus")
 
 local expect = litmus.expect
 local test = litmus.test
-
-local function adapterFor(loads: { () -> () }): litmus.Adapter
-    local specs: { litmus.Spec } = {}
-    for index, load in loads do
-        specs[index] = { path = { `Inline{index}.spec` }, load = load }
-    end
-
-    return {
-        specs = specs,
-
-        locate = function(_: string): { string }?
-            return nil
-        end,
-
-        spawn = function(run: (() -> ()) | thread): ()
-            task.spawn(run)
-        end,
-    }
-end
 
 local function show(event: litmus.Progress): string
     if event.kind == "loaded" then
@@ -37,7 +19,7 @@ end
 local function eventsOf(loads: { () -> () }): { string }
     local events: { string } = {}
 
-    litmus.run(adapterFor(loads), function(event: litmus.Progress): ()
+    litmus.run(inline(loads), function(event: litmus.Progress): ()
         table.insert(events, show(event))
     end)
 
@@ -122,7 +104,7 @@ end)
 test("reports that every test is done before the adapter gives its results", function(): ()
     local order: { string } = {}
 
-    local adapter: litmus.Adapter = adapterFor({})
+    local adapter: litmus.Adapter = inline({})
     adapter.results = function(_: { litmus.SpecResult }): litmus.Remarks?
         table.insert(order, "results")
         return nil
@@ -136,7 +118,7 @@ test("reports that every test is done before the adapter gives its results", fun
 end)
 
 test("runs the same without anyone watching", function(): ()
-    local ran: litmus.Run = litmus.run(adapterFor({
+    local ran: litmus.Run = litmus.run(inline({
         function(): ()
             litmus.test("passes", function(): () end)
         end,

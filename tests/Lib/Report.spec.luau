@@ -1,27 +1,10 @@
+local inline = require("../Utils/Inline")
 local litmus = require("../../Litmus")
 
 local expect = litmus.expect
 local group = litmus.group
 local report = litmus.report
 local test = litmus.test
-
-local function adapterWith(appendix: any): litmus.Adapter
-    return {
-        specs = {},
-
-        locate = function(_: string): { string }?
-            return nil
-        end,
-
-        spawn = function(run: (() -> ()) | thread): ()
-            task.spawn(run)
-        end,
-
-        results = function(_: { litmus.SpecResult }): litmus.Remarks?
-            return { appendix = appendix }
-        end,
-    }
-end
 
 group("pieces of text", function(): ()
     test("a heading and a text hold what they were given", function(): ()
@@ -130,5 +113,9 @@ end)
 test("a run carries the pieces an adapter gives as its appendix", function(): ()
     local pieces: { litmus.Piece } = { report.heading("Lines run"), report.tree({ report.row({ "Source" }) }) }
 
-    expect.equal(litmus.run(adapterWith(pieces)).appendix, pieces)
+    local function withPieces(_: { litmus.SpecResult }): litmus.Remarks?
+        return { appendix = pieces }
+    end
+
+    expect.equal(litmus.run(inline({}, withPieces)).appendix, pieces)
 end)

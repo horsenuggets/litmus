@@ -47,6 +47,10 @@ function anchor.resultOf(spec: litmus.SpecResult, name: string): litmus.TestResu
     error(`[Anchor]: there is no test named "{name}"`, 2)
 end
 
+function anchor.passed(spec: litmus.SpecResult, name: string): boolean
+    return anchor.resultOf(spec, name).failure == nil
+end
+
 function anchor.failureOf(spec: litmus.SpecResult, name: string): litmus.Failure
     local failure: litmus.Failure? = anchor.resultOf(spec, name).failure
     if not failure then

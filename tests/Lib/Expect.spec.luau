@@ -7,17 +7,13 @@ local test = litmus.test
 
 local spec: litmus.SpecResult = anchor.run("Lib", "Expect")
 
-local function passed(name: string): boolean
-    return anchor.resultOf(spec, name).failure == nil
-end
-
 local function messageOf(name: string): string
     return anchor.failureOf(spec, name).message
 end
 
 group("equal", function(): ()
     test("passes on equal values", function(): ()
-        expect.equal(passed("passes on equal values"), true)
+        expect.equal(anchor.passed(spec, "passes on equal values"), true)
     end)
 
     test("says what it expected and what it got", function(): ()
@@ -29,17 +25,17 @@ group("equal", function(): ()
     end)
 
     test("fails on separate tables with the same contents", function(): ()
-        expect.equal(passed("fails on separate tables with the same contents"), false)
+        expect.equal(anchor.passed(spec, "fails on separate tables with the same contents"), false)
     end)
 end)
 
 group("same", function(): ()
     test("passes on tables with the same contents", function(): ()
-        expect.equal(passed("passes on tables with the same contents"), true)
+        expect.equal(anchor.passed(spec, "passes on tables with the same contents"), true)
     end)
 
     test("passes on tables that contain themselves", function(): ()
-        expect.equal(passed("passes on tables that contain themselves"), true)
+        expect.equal(anchor.passed(spec, "passes on tables that contain themselves"), true)
     end)
 
     test("says where a nested value differs", function(): ()
@@ -57,7 +53,7 @@ end)
 
 group("error", function(): ()
     test("passes when the function throws", function(): ()
-        expect.equal(passed("passes when the function throws"), true)
+        expect.equal(anchor.passed(spec, "passes when the function throws"), true)
     end)
 
     test("fails when the function returns", function(): ()
@@ -65,15 +61,15 @@ group("error", function(): ()
     end)
 
     test("passes when the error contains the text", function(): ()
-        expect.equal(passed("passes when the error contains the text"), true)
+        expect.equal(anchor.passed(spec, "passes when the error contains the text"), true)
     end)
 
     test("looks past the position in front of the text", function(): ()
-        expect.equal(passed("passes when a position comes before the text"), true)
+        expect.equal(anchor.passed(spec, "passes when a position comes before the text"), true)
     end)
 
     test("takes the text as written, never as a pattern", function(): ()
-        expect.equal(passed("takes the text as written, never as a pattern"), true)
+        expect.equal(anchor.passed(spec, "takes the text as written, never as a pattern"), true)
     end)
 
     test("says what the error said in place of the text", function(): ()
@@ -91,7 +87,7 @@ end)
 
 group("truthy", function(): ()
     test("passes on a value that counts as true", function(): ()
-        expect.equal(passed("passes on a value that counts as true"), true)
+        expect.equal(anchor.passed(spec, "passes on a value that counts as true"), true)
     end)
 
     test("fails on nil", function(): ()
@@ -105,11 +101,11 @@ end)
 
 group("never", function(): ()
     test("passes on different values", function(): ()
-        expect.equal(passed("passes on different values"), true)
+        expect.equal(anchor.passed(spec, "passes on different values"), true)
     end)
 
     test("passes on separate tables with the same contents", function(): ()
-        expect.equal(passed("passes on separate tables with the same contents"), true)
+        expect.equal(anchor.passed(spec, "passes on separate tables with the same contents"), true)
     end)
 
     test("says which value it expected not to get", function(): ()
@@ -117,7 +113,7 @@ group("never", function(): ()
     end)
 
     test("passes where a nested value differs", function(): ()
-        expect.equal(passed("passes where a nested value differs"), true)
+        expect.equal(anchor.passed(spec, "passes where a nested value differs"), true)
     end)
 
     test("fails on tables with the same contents", function(): ()
@@ -127,7 +123,7 @@ group("never", function(): ()
     end)
 
     test("passes on nil and on false", function(): ()
-        expect.equal(passed("passes on nil and on false"), true)
+        expect.equal(anchor.passed(spec, "passes on nil and on false"), true)
     end)
 
     test("says which value counted as true", function(): ()

@@ -1,26 +1,11 @@
 local anchor = require("../Utils/Anchor")
+local inline = require("../Utils/Inline")
 local litmus = require("../../Litmus")
 
 local expect = litmus.expect
 local group = litmus.group
 local report = litmus.report
 local test = litmus.test
-
-local function adapterWith(results: ((specs: { litmus.SpecResult }) -> litmus.Remarks?)?): litmus.Adapter
-    return {
-        specs = {},
-
-        locate = function(_: string): { string }?
-            return nil
-        end,
-
-        spawn = function(run: (() -> ()) | thread): ()
-            task.spawn(run)
-        end,
-
-        results = results,
-    }
-end
 
 test("reports a spec by the names leading to it", function(): ()
     expect.same(anchor.run("Lib", "Groups").path, { "Lib", "Groups.spec" })
@@ -35,7 +20,7 @@ end)
 
 group("appendix", function(): ()
     test("is whatever the adapter says of the results", function(): ()
-        local ran: litmus.Run = litmus.run(adapterWith(function(specs: { litmus.SpecResult }): litmus.Remarks?
+        local ran: litmus.Run = litmus.run(inline({}, function(specs: { litmus.SpecResult }): litmus.Remarks?
             return { appendix = { report.text(`{#specs} specs`) } }
         end))
 
@@ -44,18 +29,18 @@ group("appendix", function(): ()
     end)
 
     test("is left out when the adapter says nothing", function(): ()
-        local silent: litmus.Run = litmus.run(adapterWith(function(_: { litmus.SpecResult }): litmus.Remarks?
+        local silent: litmus.Run = litmus.run(inline({}, function(_: { litmus.SpecResult }): litmus.Remarks?
             return nil
         end))
 
         expect.equal(silent.appendix, nil)
-        expect.equal(litmus.run(adapterWith(nil)).appendix, nil)
+        expect.equal(litmus.run(inline({})).appendix, nil)
     end)
 end)
 
 group("failure", function(): ()
     test("is the adapter's reason the run failed", function(): ()
-        local ran: litmus.Run = litmus.run(adapterWith(function(_: { litmus.SpecResult }): litmus.Remarks?
+        local ran: litmus.Run = litmus.run(inline({}, function(_: { litmus.SpecResult }): litmus.Remarks?
             return { failure = "too little ran" }
         end))
 
@@ -64,18 +49,18 @@ group("failure", function(): ()
     end)
 
     test("is left out when the adapter fails nothing", function(): ()
-        local empty: litmus.Run = litmus.run(adapterWith(function(_: { litmus.SpecResult }): litmus.Remarks?
+        local empty: litmus.Run = litmus.run(inline({}, function(_: { litmus.SpecResult }): litmus.Remarks?
             return {}
         end))
 
         expect.equal(empty.failure, nil)
-        expect.equal(litmus.run(adapterWith(nil)).failure, nil)
+        expect.equal(litmus.run(inline({})).failure, nil)
     end)
 end)
 
 test("refuses results that aren't a table", function(): ()
     local function runWithText(): ()
-        litmus.run(adapterWith(function(_: { litmus.SpecResult }): litmus.Remarks?
+        litmus.run(inline({}, function(_: { litmus.SpecResult }): litmus.Remarks?
             return "0 specs" :: any
         end))
     end
@@ -85,7 +70,7 @@ end)
 
 test("refuses an appendix that isn't a list of pieces", function(): ()
     local function runWithTextAppendix(): ()
-        litmus.run(adapterWith(function(_: { litmus.SpecResult }): litmus.Remarks?
+        litmus.run(inline({}, function(_: { litmus.SpecResult }): litmus.Remarks?
             return { appendix = "0 specs" :: any }
         end))
     end

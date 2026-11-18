@@ -40,5 +40,5 @@ test("leaves a group when its body ends", function(): ()
 end)
 
 test("passes a test whose body does nothing", function(): ()
-    expect.equal(anchor.resultOf(spec, "sits in one group").failure, nil)
+    expect.truthy(anchor.passed(spec, "sits in one group"))
 end)

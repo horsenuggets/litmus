@@ -1,24 +1,11 @@
 local anchor = require("../Utils/Anchor")
+local inline = require("../Utils/Inline")
 local litmus = require("../../Litmus")
 
 local expect = litmus.expect
 local test = litmus.test
 
 local spec: litmus.SpecResult = anchor.run("Lib", "After")
-
-local function adapterFor(load: () -> ()): litmus.Adapter
-    return {
-        specs = { { path = { "Inline.spec" }, load = load } },
-
-        locate = function(_: string): { string }?
-            return nil
-        end,
-
-        spawn = function(run: (() -> ()) | thread): ()
-            task.spawn(run)
-        end,
-    }
-end
 
 test("lists every after last, in the order registered", function(): ()
     local names: { string } = {}
@@ -38,7 +25,7 @@ test("lists every after last, in the order registered", function(): ()
 end)
 
 test("runs an after once every test has finished, whether it waited or failed", function(): ()
-    expect.equal(anchor.resultOf(spec, "runs once every test has finished").failure, nil)
+    expect.truthy(anchor.passed(spec, "runs once every test has finished"))
 end)
 
 test("reports an after that fails as a failed test", function(): ()
@@ -54,38 +41,42 @@ test("gives an after no groups", function(): ()
 end)
 
 test("refuses an after registered inside a group", function(): ()
-    expect.equal(anchor.resultOf(spec, "refuses an after registered inside a group").failure, nil)
+    expect.truthy(anchor.passed(spec, "refuses an after registered inside a group"))
 end)
 
 test("refuses an after registered while tests run", function(): ()
-    expect.equal(anchor.resultOf(spec, "refuses an after registered while tests run").failure, nil)
+    expect.truthy(anchor.passed(spec, "refuses an after registered while tests run"))
 end)
 
 test("runs the afters of a spec with no tests", function(): ()
     local cleaned: boolean = false
 
-    local inline: litmus.Run = litmus.run(adapterFor(function(): ()
+    local function cleansUp(): ()
         litmus.after("cleans up", function(): ()
             cleaned = true
         end)
-    end))
+    end
+
+    local ran: litmus.Run = litmus.run(inline({ cleansUp }))
 
     expect.equal(cleaned, true)
-    expect.equal(#inline.specs[1].tests, 1)
+    expect.equal(#ran.specs[1].tests, 1)
 end)
 
 test("runs the afters registered before a spec failed to load, and reports none of them", function(): ()
     local cleaned: boolean = false
 
-    local inline: litmus.Run = litmus.run(adapterFor(function(): ()
+    local function cleansUpThenFails(): ()
         litmus.after("cleans up", function(): ()
             cleaned = true
         end)
 
         error("boom")
-    end))
+    end
+
+    local ran: litmus.Run = litmus.run(inline({ cleansUpThenFails }))
 
     expect.equal(cleaned, true)
-    expect.truthy(inline.specs[1].failure)
-    expect.same(inline.specs[1].tests, {})
+    expect.truthy(ran.specs[1].failure)
+    expect.same(ran.specs[1].tests, {})
 end)
