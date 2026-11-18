@@ -39,9 +39,9 @@ export type Collected = {
     sources: { Source },
 }
 
-local PORTS: { number } = { 37100, 37101 }
+local CLI_PORTS: { number } = { 37100, 37101 }
 
-local PROTOCOL: number = 3
+local CLI_PROTOCOL: number = 3
 
 type Method = "GET" | "POST"
 
@@ -75,8 +75,8 @@ end
 
 local bridge = {}
 
-bridge.PORTS = PORTS
-bridge.PROTOCOL = PROTOCOL
+bridge.CLI_PORTS = CLI_PORTS
+bridge.CLI_PROTOCOL = CLI_PROTOCOL
 
 function bridge.offer(port: number): Offer?
     local ok: boolean, body: string = send(port, "GET", "/offer")

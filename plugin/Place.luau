@@ -31,7 +31,7 @@ local function sourceOf(instance: Instance): string?
     return nil
 end
 
-local function hash(source: string): string
+local function hashWithoutCarriageReturns(source: string): string
     local normalized: string = string.gsub(source, "\r", "")
     local digest: buffer = encodingService:ComputeBufferHash(buffer.fromstring(normalized), Enum.HashAlgorithm.Sha256)
 
@@ -74,7 +74,7 @@ function place.compare(files: { bridge.File }): Comparison
         end
 
         local source: string? = sourceOf(instance)
-        if not source or hash(source) ~= file.hash then
+        if not source or hashWithoutCarriageReturns(source) ~= file.hash then
             table.insert(comparison.differing, file.path)
         end
     end

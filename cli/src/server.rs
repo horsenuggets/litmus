@@ -5,9 +5,9 @@ use serde_json::Value;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiny_http::{Method, Request, Response};
 
-const PORTS: [u16; 2] = [37100, 37101];
+const PLUGIN_PORTS: [u16; 2] = [37100, 37101];
 
-const PROTOCOL: u32 = 3;
+const PLUGIN_PROTOCOL: u32 = 3;
 
 pub struct Timeouts {
     pub until_claimed: Duration,
@@ -86,7 +86,7 @@ impl Exchange {
     fn new(manifest: &Manifest) -> Result<Exchange, String> {
         let run_id = new_run_id();
         let offer = serde_json::to_string(&RunOffer {
-            protocol: PROTOCOL,
+            protocol: PLUGIN_PROTOCOL,
             kind: "run",
             project: &manifest.project,
             run_id: &run_id,
@@ -179,7 +179,7 @@ impl<'a> Showing<'a> {
     fn new(project: &str, run: &'a str) -> Result<Showing<'a>, String> {
         let run_id = new_run_id();
         let offer = serde_json::to_string(&ShowOffer {
-            protocol: PROTOCOL,
+            protocol: PLUGIN_PROTOCOL,
             kind: "show",
             project,
             run_id: &run_id,
@@ -222,11 +222,11 @@ pub struct Server {
 
 impl Server {
     pub fn open() -> Result<Server, String> {
-        PORTS.into_iter().find_map(Server::bind).ok_or_else(|| {
+        PLUGIN_PORTS.into_iter().find_map(Server::bind).ok_or_else(|| {
             format!(
                 "ports {} to {} are all in use",
-                PORTS[0],
-                PORTS[PORTS.len() - 1]
+                PLUGIN_PORTS[0],
+                PLUGIN_PORTS[PLUGIN_PORTS.len() - 1]
             )
         })
     }
@@ -318,7 +318,7 @@ impl Server {
             return Ok(None);
         };
 
-        if !is_local(&request, self.port) {
+        if !is_safe_from_rebinding(&request, self.port) {
             respond(request, 403);
             return Ok(None);
         }
@@ -341,7 +341,7 @@ fn new_run_id() -> String {
     format!("{nanos:x}-{:x}", std::process::id())
 }
 
-fn is_local(request: &Request, port: u16) -> bool {
+fn is_safe_from_rebinding(request: &Request, port: u16) -> bool {
     request.headers().iter().any(|header| {
         let host = header.value.as_str();
         header.field.equiv("Host") && (host == "127.0.0.1" || host == format!("127.0.0.1:{port}"))

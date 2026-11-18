@@ -122,7 +122,7 @@ fn collect(
 
             scripts.push(Script {
                 path: path.clone(),
-                hash: hash(&source),
+                hash: hash_without_carriage_returns(&source),
                 file: file.clone(),
             });
         }
@@ -139,7 +139,7 @@ fn is_luau(file: &Path) -> bool {
         .is_some_and(|extension| extension == "luau" || extension == "lua")
 }
 
-fn hash(source: &[u8]) -> String {
+fn hash_without_carriage_returns(source: &[u8]) -> String {
     let normalized: Vec<u8> = source.iter().copied().filter(|byte| *byte != b'\r').collect();
 
     Sha256::digest(&normalized)
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn hashes_as_sha256_in_hex() {
         assert_eq!(
-            hash(b"abc"),
+            hash_without_carriage_returns(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
     }

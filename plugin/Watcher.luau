@@ -48,8 +48,8 @@ local function collected(offer: bridge.ShowOffer): Arrival?
 end
 
 local function answer(offer: bridge.Offer): (boolean, Arrival?)
-    if offer.protocol ~= bridge.PROTOCOL then
-        warn(`[Litmus]: {offer.project} speaks protocol {offer.protocol} and this plugin speaks {bridge.PROTOCOL}; update the older one`)
+    if offer.protocol ~= bridge.CLI_PROTOCOL then
+        warn(`[Litmus]: {offer.project} speaks protocol {offer.protocol} and this plugin speaks {bridge.CLI_PROTOCOL}; update the older one`)
         return true, nil
     end
 
@@ -128,7 +128,7 @@ function watcher.start(told: Listener): ()
     listener = told
     watching = true
 
-    for _, port in bridge.PORTS do
+    for _, port in bridge.CLI_PORTS do
         if not watched[port] then
             task.spawn(watch, port)
         end
