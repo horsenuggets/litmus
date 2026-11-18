@@ -9,7 +9,6 @@ export type Collected = {
     afters: { Test },
 }
 
--- Set only while a spec loads, so a call at any other time fails instead of vanishing
 local collecting: Collected? = nil
 local groups: { string } = {}
 

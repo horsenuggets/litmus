@@ -1,17 +1,11 @@
--- Requires nothing, so the host can load this alone and load everything else through it
-
--- A host's own handle for a module; `any` so each host can type it as what it really is
 export type Module = any
 
--- What the loader needs from the platform it runs on; an adapter that loads through it is the implementation
 export type Host = {
-    -- What `load` runs the module's chunk under
     chunkName: (module: Module) -> string,
     resolve: (from: Module, target: unknown) -> Module,
     load: (module: Module, globals: { [string]: any }) -> (...any) -> ...any,
 }
 
--- Boxed because a module can return nil
 type Loaded = { value: any }
 
 type Link = {
@@ -38,7 +32,6 @@ function loader.new(host: Host): Class
     return self
 end
 
--- The chain of requires leading back to `module`, if it's still loading further up
 function loader._findCycle(self: Class, requirer: Link?, module: Module): string?
     local names: { string } = { self._host.chunkName(module) }
     local link: Link? = requirer
@@ -59,7 +52,6 @@ end
 function loader._run(self: Class, module: Module, requirer: Link?): { n: number, [number]: any }
     local link: Link = { module = module, requirer = requirer }
 
-    -- Noted before loading, so a module that doesn't compile can still be found by the name its error gives
     self._byChunk[self._host.chunkName(module)] = module
 
     local chunk: (...any) -> ...any = self._host.load(module, {
@@ -95,12 +87,10 @@ function loader.require(self: Class, module: Module): any
     return self:_load(module, nil)
 end
 
--- The module whose chunk runs under `chunk`, if this session has run it
 function loader.moduleOf(self: Class, chunk: string): Module?
     return self._byChunk[chunk]
 end
 
--- For a spec: runs it for what it registers, caching nothing and ignoring what it returns
 function loader.execute(self: Class, module: Module): ()
     self:_run(module, nil)
 end

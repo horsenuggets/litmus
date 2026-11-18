@@ -5,7 +5,6 @@ local report = require("./Report")
 export type Failure = {
     message: string,
 
-    -- The names leading to the script from the top of the place
     source: { string },
     line: number,
     trace: string,
@@ -21,7 +20,6 @@ export type SpecResult = {
     path: { string },
     tests: { TestResult },
 
-    -- Set when the spec itself didn't load, in which case none of its tests ran
     failure: Failure?,
 }
 
@@ -57,7 +55,6 @@ export type Progress =
 
 type Tell = (event: Progress) -> ()
 
--- A failure knows its script only by the name the chunk ran under, which the adapter turns back into the script
 local function placed(adapter: Adapter, caught: failure.Caught?): Failure?
     if not caught then
         return nil
@@ -66,7 +63,6 @@ local function placed(adapter: Adapter, caught: failure.Caught?): Failure?
     return {
         message = caught.message,
 
-        -- A chunk the adapter can't place has nothing but that name to go by
         source = adapter.locate(caught.chunk) or { caught.chunk },
         line = caught.line,
         trace = caught.trace,
@@ -191,7 +187,6 @@ end
 
 local runner = {}
 
--- The adapter's specs must require this copy of the lib, or they register with another
 function runner.run(adapter: Adapter, observe: Tell?): Run
     local results: { SpecResult } = {}
     local running: Running = { count = 0, waiter = nil }
