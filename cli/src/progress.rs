@@ -1,5 +1,4 @@
-use crate::render;
-use crate::style::{BOLD, GREEN, RED, badge, paint};
+use crate::style::{GREEN, Labelled, RED, badge, counts, headline, labelled};
 use anstyle::{AnsiColor, Color, Style};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -106,7 +105,7 @@ impl Progress {
 
         let mut lines: Vec<String> = rows
             .iter()
-            .map(|(style, label, name, note)| render::headline(*style, label, name, width, note))
+            .map(|(style, label, name, note)| headline(*style, label, name, width, note))
             .collect();
 
         let unlisted = self.running.len().saturating_sub(MAX_SPECS_LISTED);
@@ -118,11 +117,11 @@ impl Progress {
             lines.push(String::new());
         }
 
-        let tests = render::counts(&[(self.failed, "failed", RED), (self.passed, "passed", GREEN)]);
-
-        lines.push(format!(" {}  {} of {} done", paint(BOLD, "Specs"), self.done, self.specs.len()));
-        lines.push(format!(" {}  {tests}", paint(BOLD, "Tests")));
-        lines.push(format!(" {}   {time}", paint(BOLD, "Time")));
+        lines.extend(labelled(&[
+            Labelled { label: "Specs", value: format!("{} of {} done", self.done, self.specs.len()) },
+            Labelled { label: "Tests", value: counts(&[(self.failed, "failed", RED), (self.passed, "passed", GREEN)]) },
+            Labelled { label: "Time", value: time },
+        ]));
 
         lines
     }

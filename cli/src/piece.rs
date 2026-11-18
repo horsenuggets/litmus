@@ -1,4 +1,4 @@
-use crate::style::{BOLD, DIM, GREEN, paint};
+use crate::style::{BOLD, DIM, GREEN, Labelled, labelled, paint};
 use serde::Deserialize;
 
 const METER_WIDTH: usize = 24;
@@ -116,16 +116,12 @@ fn draw(piece: &Piece) -> Vec<String> {
 }
 
 fn stats(items: &[Stat]) -> Vec<String> {
-    let width = items.iter().map(|item| item.label.chars().count()).max().unwrap_or(0);
-
-    items
+    let rows: Vec<Labelled> = items
         .iter()
-        .map(|item| {
-            let gap = " ".repeat(width - item.label.chars().count());
+        .map(|item| Labelled { label: &item.label, value: item.text.clone() })
+        .collect();
 
-            format!(" {}{gap}  {}", paint(BOLD, &item.label), item.text)
-        })
-        .collect()
+    labelled(&rows)
 }
 
 fn legend(items: &[Key]) -> String {

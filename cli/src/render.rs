@@ -1,7 +1,7 @@
 use crate::manifest::Manifest;
 use crate::piece;
 use crate::results::{Failure, Run, SpecResult, Tally};
-use crate::style::{BOLD, DIM, GREEN, ORANGE, ORANGE_COLOR, RED, badge, paint};
+use crate::style::{DIM, GREEN, Labelled, ORANGE, ORANGE_COLOR, RED, badge, counts, headline, labelled, paint};
 use anstyle::{AnsiColor, Color, Style};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -10,11 +10,7 @@ const PASS_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::Green))
 const FAIL_BADGE: Style = badge(AnsiColor::BrightWhite, Color::Ansi(AnsiColor::Red));
 const ERROR_BADGE: Style = badge(AnsiColor::Black, ORANGE_COLOR);
 
-const LABEL_WIDTH: usize = "ERROR".len();
-
 const DETAIL_INDENT: &str = "     ";
-
-const REASON_INDENT: &str = "                ";
 
 const MIN_MESSAGE_WIDTH: usize = 30;
 
@@ -86,8 +82,10 @@ pub fn run(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
         lines.push(String::new());
     }
 
-    lines.extend(summary(&Tally::of(results)));
-    lines.extend(run.failure.as_deref().map(run_failure).unwrap_or_default());
+    let mut counted = summary(&Tally::of(results));
+    counted.extend(run.failure.as_deref().map(run_failure));
+
+    lines.extend(labelled(&counted));
     lines.push(String::new());
 
     lines.join("\n")
@@ -122,18 +120,7 @@ fn spec_lines(spec: &SpecResult, sources: &Sources, name_width: usize, columns: 
     lines
 }
 
-pub fn headline(style: Style, label: &str, name: &str, width: usize, note: &str) -> String {
-    let badge = paint(style, &format!(" {label} "));
-    let gap = " ".repeat(LABEL_WIDTH - label.len());
-
-    if note.is_empty() {
-        return format!(" {badge}{gap}  {name}");
-    }
-
-    format!(" {badge}{gap}  {name:<width$}  {}", paint(DIM, note))
-}
-
-fn summary(tally: &Tally) -> [String; 2] {
+fn summary(tally: &Tally) -> Vec<Labelled<'static>> {
     let specs = counts(&[
         (tally.failed_specs, "failed", RED),
         (tally.errored_specs, "errored", ORANGE),
@@ -144,20 +131,21 @@ fn summary(tally: &Tally) -> [String; 2] {
         (tally.passed_tests, "passed", GREEN),
     ]);
 
-    [
-        format!(" {}  {specs}", paint(BOLD, "Specs")),
-        format!(" {}  {tests}", paint(BOLD, "Tests")),
+    vec![
+        Labelled { label: "Specs", value: specs },
+        Labelled { label: "Tests", value: tests },
     ]
 }
 
-fn run_failure(reason: &str) -> Vec<String> {
+fn run_failure(reason: &str) -> Labelled<'static> {
     let mut reason = reason.trim_end().lines();
     let first = reason.next().unwrap_or_default();
 
-    let mut lines = vec![format!(" {}    {}: {first}", paint(BOLD, "Run"), paint(RED, "failed"))];
-    lines.extend(reason.map(|line| format!("{REASON_INDENT}{line}")));
+    let under = " ".repeat("failed: ".len());
+    let mut lines = vec![format!("{}: {first}", paint(RED, "failed"))];
+    lines.extend(reason.map(|line| format!("{under}{line}")));
 
-    lines
+    Labelled { label: "Run", value: lines.join("\n") }
 }
 
 fn describe(failure: &Failure, sources: &Sources, columns: Option<usize>) -> Vec<String> {
@@ -215,20 +203,6 @@ fn tidy<'a>(failure: &'a Failure, sources: &Sources) -> &'a str {
     let message = failure.message.strip_prefix(&position).unwrap_or(&failure.message);
 
     message.strip_prefix(LIB_TAG).unwrap_or(message)
-}
-
-pub fn counts(parts: &[(usize, &str, Style)]) -> String {
-    let shown: Vec<String> = parts
-        .iter()
-        .filter(|(count, _, _)| *count > 0)
-        .map(|(count, label, style)| paint(*style, &format!("{count} {label}")))
-        .collect();
-
-    if shown.is_empty() {
-        return paint(DIM, "none");
-    }
-
-    shown.join(", ")
 }
 
 fn plural(count: usize, noun: &str) -> String {
