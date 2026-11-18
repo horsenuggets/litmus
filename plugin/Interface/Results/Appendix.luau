@@ -2,6 +2,7 @@ local cells = require("../Cells")
 local flux = require("../../Packages/Flux")
 local label = require("../Components/Label")
 local outcome = require("../../Outcome")
+local padded = require("./Padded")
 local theme = require("../Theme")
 local tone = require("./Tone")
 local treeRow = require("./TreeRow")
@@ -30,25 +31,6 @@ local SWATCH_HEIGHT: number = 8
 local function appendix(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
 
-    local function padded(position: number, name: string, children: any, top: number?, bottom: number?): Frame
-        return scope:element "Frame" {
-            Name = name,
-            LayoutOrder = position,
-
-            AutomaticSize = Enum.AutomaticSize.Y,
-            Size = UDim2.fromScale(1, 0),
-
-            scope:element "UIPadding" {
-                PaddingLeft = UDim.new(0, theme.rowPadding),
-                PaddingRight = UDim.new(0, theme.rowPadding),
-                PaddingTop = UDim.new(0, top or 0),
-                PaddingBottom = UDim.new(0, bottom or 0),
-            },
-
-            children,
-        }
-    end
-
     local function heading(position: number, text: string): Frame
         local shown: TextLabel = label(scope, {
             text = text,
@@ -57,16 +39,26 @@ local function appendix(scope: flux.Scope, props: Props): Frame
             color = colors.brightText,
         })
 
-        return padded(position, "Heading", { scope:element "UIListLayout" {}, shown }, HEADING_TOP, HEADING_BOTTOM)
+        return padded(scope, {
+            name = "Heading",
+            layoutOrder = position,
+
+            top = HEADING_TOP,
+            bottom = HEADING_BOTTOM,
+
+            children = { scope:element "UIListLayout" {}, shown },
+        })
     end
 
     local function text(position: number, shown: string): Frame
-        return padded(position, "Text", wrappedText(scope, {
+        local body: TextLabel = wrappedText(scope, {
             text = words.plain(shown),
             font = theme.codeFont,
             size = theme.smallTextSize,
             color = colors.text,
-        }))
+        })
+
+        return padded(scope, { name = "Text", layoutOrder = position, children = body })
     end
 
     local function stats(position: number, items: { outcome.Stat }): Frame
@@ -88,7 +80,7 @@ local function appendix(scope: flux.Scope, props: Props): Frame
             }))
         end
 
-        return padded(position, "Stats", lines)
+        return padded(scope, { name = "Stats", layoutOrder = position, children = lines })
     end
 
     local function legend(position: number, items: { outcome.Key }): Frame
@@ -143,7 +135,7 @@ local function appendix(scope: flux.Scope, props: Props): Frame
             })
         end
 
-        return padded(position, "Legend", keys)
+        return padded(scope, { name = "Legend", layoutOrder = position, children = keys })
     end
 
     local function tree(position: number, rows: { outcome.Row }): Frame

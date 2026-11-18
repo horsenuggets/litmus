@@ -4,6 +4,7 @@ local flux = require("../../Packages/Flux")
 local icon = require("../Components/Icon")
 local label = require("../Components/Label")
 local outcome = require("../../Outcome")
+local padded = require("./Padded")
 local paths = require("../Paths")
 local statusStyle = require("./StatusStyle")
 local testList = require("./TestList")
@@ -81,21 +82,14 @@ local function specRow(scope: flux.Scope, props: Props): Frame
                 local built: { Instance } = {}
 
                 if specFailure then
-                    table.insert(built, inner:element "Frame" {
-                        Name = "Failure",
-                        LayoutOrder = 1,
+                    table.insert(built, padded(inner, {
+                        name = "Failure",
+                        layoutOrder = 1,
 
-                        AutomaticSize = Enum.AutomaticSize.Y,
-                        Size = UDim2.fromScale(1, 0),
+                        bottom = FAILURE_BOTTOM,
 
-                        inner:element "UIPadding" {
-                            PaddingLeft = UDim.new(0, theme.rowPadding),
-                            PaddingRight = UDim.new(0, theme.rowPadding),
-                            PaddingBottom = UDim.new(0, FAILURE_BOTTOM),
-                        },
-
-                        failureBox(inner, { failure = specFailure, color = style.color }),
-                    })
+                        children = failureBox(inner, { failure = specFailure, color = style.color }),
+                    }))
                 end
 
                 if #spec.tests > 0 then
