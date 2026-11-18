@@ -1,9 +1,11 @@
+use crate::rojo;
 use rbx_dom_weak::InstanceBuilder;
 use rbx_dom_weak::types::Variant;
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
-use std::process::{self, Command};
+use std::process;
 
 const SCRIPT_SERVICE: &str = "ServerScriptService";
 const LOADSTRING_SWITCH: &str = "LoadStringEnabled";
@@ -11,19 +13,7 @@ const LOADSTRING_SWITCH: &str = "LoadStringEnabled";
 pub fn build(project_dir: &Path, rojo_project: Option<&Path>) -> Result<Vec<u8>, String> {
     let file = env::temp_dir().join(format!("litmus-{}.rbxl", process::id()));
 
-    let output = Command::new("rojo")
-        .arg("build")
-        .args(rojo_project)
-        .arg("--output")
-        .arg(&file)
-        .current_dir(project_dir)
-        .output()
-        .map_err(|error| format!("couldn't run rojo: {error}"))?;
-
-    if !output.status.success() {
-        let reason = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("rojo build failed: {}", reason.trim()));
-    }
+    rojo::run(project_dir, "build", rojo_project, &[OsStr::new("--output"), file.as_os_str()])?;
 
     let built = fs::read(&file).map_err(|error| format!("couldn't read the place rojo built: {error}"));
     let _ = fs::remove_file(&file);

@@ -7,6 +7,7 @@ mod plugin;
 mod progress;
 mod render;
 mod results;
+mod rojo;
 mod selection;
 mod server;
 mod show;

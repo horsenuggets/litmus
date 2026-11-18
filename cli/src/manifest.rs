@@ -1,9 +1,9 @@
+use crate::rojo;
 use crate::selection::Selection;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const SPEC_SUFFIX: &str = ".spec";
 
@@ -37,19 +37,9 @@ pub struct Manifest {
 
 impl Manifest {
     pub fn read(project_dir: &Path, rojo_project: Option<&Path>) -> Result<Manifest, String> {
-        let output = Command::new("rojo")
-            .arg("sourcemap")
-            .args(rojo_project)
-            .current_dir(project_dir)
-            .output()
-            .map_err(|error| format!("couldn't run rojo: {error}"))?;
+        let sourcemap = rojo::run(project_dir, "sourcemap", rojo_project, &[])?;
 
-        if !output.status.success() {
-            let reason = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("rojo sourcemap failed: {}", reason.trim()));
-        }
-
-        Manifest::from_sourcemap(&output.stdout, project_dir)
+        Manifest::from_sourcemap(&sourcemap, project_dir)
     }
 
     fn from_sourcemap(sourcemap: &[u8], project_dir: &Path) -> Result<Manifest, String> {
