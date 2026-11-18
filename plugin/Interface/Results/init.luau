@@ -11,7 +11,6 @@ local theme = require("./Theme")
 local words = require("./Words")
 
 export type Props = {
-    -- The run to show: its results, or why it has none
     ran: flux.UsedAs<outcome.Run>,
 }
 
@@ -22,7 +21,6 @@ local FOLD_LINE: number = 1
 local SCROLL_BAR_THICKNESS: number = 7
 local SCROLL_BAR_TRANSPARENCY: number = 0.65
 
--- What the results window holds, built into whatever it is parented to
 local function results(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
 
@@ -34,7 +32,6 @@ local function results(scope: flux.Scope, props: Props): Frame
 
     local openRows: { [string]: boolean } = {}
 
-    -- A pick only holds while some spec has that outcome, so new results can't leave the list empty
     local selected: flux.Computed<outcome.Status?> = scope:computed(function(use: flux.Use): outcome.Status?
         local status: outcome.Status? = use(picked)
 
@@ -57,7 +54,6 @@ local function results(scope: flux.Scope, props: Props): Frame
         return rows
     end
 
-    -- Passing specs fold behind a labelled line while anything is wrong, so what needs attention is all that shows
     local function foldOf(building: flux.Scope, passed: { outcome.SpecResult }, root: outcome.Path, layoutOrder: number): Frame
         local tests: number = 0
         for _, spec in passed do
@@ -70,7 +66,6 @@ local function results(scope: flux.Scope, props: Props): Frame
             height = FOLD_HEIGHT,
             startsOpen = false,
 
-            -- The specs behind the fold are the list's own rows, so they line up with the ones above it
             indent = 0,
 
             head = {
@@ -115,7 +110,6 @@ local function results(scope: flux.Scope, props: Props): Frame
             }
         end
 
-        -- Worked out over every spec, so narrowing the list doesn't change how a row's path reads
         local specPaths: { outcome.Path } = {}
         for index, spec in ran.specs do
             specPaths[index] = spec.path
@@ -148,7 +142,6 @@ local function results(scope: flux.Scope, props: Props): Frame
         end,
     })
 
-    -- The list starts where the summary ends, whatever height the summary gives itself
     local listTop: number = top.Size.Y.Offset
 
     return scope:element "Frame" {
@@ -170,7 +163,6 @@ local function results(scope: flux.Scope, props: Props): Frame
             CanvasSize = UDim2.new(),
             ScrollingDirection = Enum.ScrollingDirection.Y,
 
-            -- Rows give up the bar's width while it shows, so it never covers them
             VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
             ScrollBarThickness = SCROLL_BAR_THICKNESS,
             ScrollBarImageColor3 = colors.brightText,
@@ -187,7 +179,6 @@ local function results(scope: flux.Scope, props: Props): Frame
                 Padding = UDim.new(0, theme.listGap),
             },
 
-            -- A new run or a new pick replaces every row, since nothing ties one list's rows to the next's
             scope:computed(function(use: flux.Use, inner: flux.Scope): { Instance }
                 local ran: outcome.Run = use(props.ran)
                 local rows: { Instance } = listOf(inner, ran, use(selected))

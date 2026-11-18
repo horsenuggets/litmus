@@ -17,12 +17,10 @@ export type Props = {
 
 local GROUP_HEIGHT: number = 26
 
--- A spec's tests under the groups they sit in, each failed test with what went wrong beneath it
 local function testList(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
     local root: testTree.Group = testTree(props.tests)
 
-    -- With nothing wrong there is nothing to draw the eye, so every group shows; otherwise only the ones with a failure do
     local allPassed: boolean = outcome.failedCount(props.tests) == 0
 
     local function testLine(building: flux.Scope, test: outcome.TestResult, layoutOrder: number): Frame

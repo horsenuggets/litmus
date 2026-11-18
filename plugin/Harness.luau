@@ -4,7 +4,6 @@ local outcome = require("./Outcome")
 
 local LIB_NAME: string = "Litmus"
 
--- Where a place keeps its code, and so where its specs can be; the rest of the DataModel holds places a plugin can't read
 local CODE_SERVICES: { string } = {
     "Workspace",
     "ReplicatedFirst",
@@ -19,7 +18,6 @@ local CODE_SERVICES: { string } = {
 local NO_SPECS: string = "This place has no .spec modules to run."
 local BUSY: string = "Another run is still going."
 
--- Held for as long as a run takes, which is longer than one step only if a test yields
 local running: boolean = false
 
 local function moduleIn(parent: Instance, name: string): ModuleScript
@@ -40,12 +38,10 @@ local function folderIn(parent: Instance, name: string): Instance
     return found
 end
 
--- Goes through the place's own copy of the lib, so the specs and the runner share one
 local function runThroughLib(roots: { Instance }): outcome.LibRun
     local lib: ModuleScript = moduleIn(replicatedStorage, LIB_NAME)
     local entry: ModuleScript = moduleIn(folderIn(lib, "Adapter"), "Roblox")
 
-    -- Loaded straight from its source, so Studio's require cache stays out of it
     local chunk: ((...any) -> ...any)?, problem: string? = loadstring(entry.Source, `={entry:GetFullName()}`)
     if not chunk then
         error(`[Litmus]: {entry:GetFullName()} didn't compile: {problem}`, 0)
@@ -56,8 +52,6 @@ end
 
 local harness = {}
 
--- Runs every spec under `roots`, a spec being a root itself or anything beneath one
--- Never throws: a run that couldn't happen comes back as the problem that stopped it
 function harness.specs(roots: { Instance }): outcome.Run
     if running then
         return { kind = "problem", message = BUSY }
@@ -74,7 +68,6 @@ function harness.specs(roots: { Instance }): outcome.Run
     return outcome.ofLib(result)
 end
 
--- Runs every spec the place has, for a run nobody handed a list to
 function harness.all(): outcome.Run
     local roots: { Instance } = {}
 

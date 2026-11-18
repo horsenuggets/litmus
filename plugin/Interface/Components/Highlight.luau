@@ -4,11 +4,9 @@ local theme = require("../Theme")
 export type Props = {
     color: flux.UsedAs<Color3>,
 
-    -- How strongly the fill shows; it eases to this whenever it changes
     opacity: flux.UsedAs<number>,
 }
 
--- A rounded fill over whatever holds it, for marking what is hovered or picked
 local function highlight(scope: flux.Scope, props: Props): Frame
     local opacity: flux.Spring<number> = scope:spring(props.opacity, theme.hoverSpeed)
 

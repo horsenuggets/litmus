@@ -11,7 +11,6 @@ export type Props = {
     layoutOrder: number?,
 }
 
--- Text as wide as what holds it and as tall as its wrapped lines
 local function wrappedText(scope: flux.Scope, props: Props): TextLabel
     return scope:element "TextLabel" {
         LayoutOrder = props.layoutOrder,
@@ -31,8 +30,6 @@ local function wrappedText(scope: flux.Scope, props: Props): TextLabel
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Top,
 
-        -- Set once every property is on: Flux starts a label scaled, which holds wrapping on, and wrapping set
-        -- before scaling is turned off may not be kept
         function(_: flux.Scope, label: TextLabel): ()
             label.TextWrapped = true
         end,

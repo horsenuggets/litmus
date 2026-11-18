@@ -11,33 +11,25 @@ export type Props = {
     startsOpen: boolean,
     toggled: ((open: boolean) -> ())?,
 
-    -- How far in the content starts; left out, it starts under whatever follows the arrow
     indent: number?,
 
-    -- Laid out in a row after the arrow
     head: any,
 
-    -- Builds what the row opens to show, the first time it opens; a row without this can't open
     content: ((scope: flux.Scope) -> any)?,
 }
 
--- Fainter than a button's hover fill, since a row is wide and its fill covers far more
 local HOVER_ALPHA: number = 0.05
 
 local OPEN_SPEED: number = 38
 local OPEN_DAMPING: number = 1.1
 
--- The arrow is drawn pointing down, and is turned to point right while the row is shut
 local SHUT_ROTATION: number = -90
 
--- Content starts under whatever follows the arrow, so a row nested in it puts its own arrow there
 local CONTENT_INDENT: number = theme.iconSize + theme.rowGap
 
--- Room above the content, so the head's hover fill doesn't sit flush against what it opened
 local CONTENT_TOP: number = 4
 local CONTENT_BOTTOM: number = 6
 
--- A row that opens to show more below it, sliding open and shut
 local function collapsible(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
 
@@ -46,7 +38,6 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
 
     local open: flux.Value<boolean> = scope:value(canOpen and props.startsOpen)
 
-    -- Content is only built once the row first opens, since most rows of a passing run never do
     local built: flux.Value<boolean> = scope:value(flux.peek(open))
 
     local openness: flux.Spring<number> = scope:spring(scope:computed(function(use: flux.Use): number
@@ -125,7 +116,6 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
                     name = "chevron",
                     gradient = colors.mutedGradient,
 
-                    -- A row that can't open keeps the arrow's room, so its head lines up with the rows that can
                     transparency = if canOpen then 0 else 1,
 
                     rotation = scope:computed(function(use: flux.Use): number
@@ -133,7 +123,6 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
                     end),
                 }),
 
-                -- The head's items get a row of their own, so their layout orders never have to know about the arrow
                 scope:element "Frame" {
                     Name = "Items",
                     LayoutOrder = 2,
@@ -159,7 +148,6 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
 
             ClipsDescendants = true,
 
-            -- The height follows what the content measures, scaled by how far open the row is
             Size = scope:computed(function(use: flux.Use): UDim2
                 return UDim2.new(1, 0, 0, use(contentHeight) * use(openness))
             end),

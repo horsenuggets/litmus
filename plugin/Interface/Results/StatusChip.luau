@@ -8,7 +8,6 @@ export type Props = {
     style: statusStyle.Style,
     count: flux.UsedAs<number>,
 
-    -- Whether the list is narrowed to this outcome, which pressing the chip asks to change
     selected: flux.UsedAs<boolean>,
     activated: () -> (),
 
@@ -19,14 +18,12 @@ local HEIGHT: number = 26
 local DOT_SIZE: number = 8
 local DOT_GAP: number = 6
 
--- An outcome's count of specs behind a dot in its colour; pressing it picks that outcome
 local function statusChip(scope: flux.Scope, props: Props): TextButton
     local colors: theme.Colors = theme.colors(scope)
     local style: statusStyle.Style = props.style
 
     local hovering: flux.Value<boolean> = scope:value(false)
 
-    -- An outcome nothing had is shown greyed, and can't be picked
     local present: flux.Computed<boolean> = scope:computed(function(use: flux.Use): boolean
         return use(props.count) > 0
     end)
@@ -48,7 +45,6 @@ local function statusChip(scope: flux.Scope, props: Props): TextButton
             end,
         }),
 
-        -- Tinted in the outcome's colour while picked, and in the plain hover colour while only hovered
         highlight(scope, {
             color = scope:computed(function(use: flux.Use): Color3
                 return if use(props.selected) then use(style.color) else use(colors.buttonHover)
@@ -86,7 +82,6 @@ local function statusChip(scope: flux.Scope, props: Props): TextButton
             AnchorPoint = Vector2.zero,
             Position = UDim2.new(),
 
-            -- The chip takes its width from this label, padding included
             AutomaticSize = Enum.AutomaticSize.X,
             Size = UDim2.fromScale(0, 1),
 

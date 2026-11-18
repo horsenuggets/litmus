@@ -10,7 +10,6 @@ local theme = require("./Theme")
 
 local studio: Studio = settings().Studio
 
--- The sizes the windows open at, so the story shows what each window will
 local CONTROL_SIZE: UDim2 = UDim2.fromOffset(320, 210)
 local RESULTS_SIZE: UDim2 = UDim2.fromOffset(560, 640)
 local GAP: number = 20
@@ -19,12 +18,10 @@ local function inTests(...: string): outcome.Path
     return { "ReplicatedStorage", "Tests", ... }
 end
 
--- The scripts the failures point at, which this place really has, so their lines of code show
 local EXPECT: outcome.Path = inTests("Anchor", "Lib", "Expect")
 local FAILURES: outcome.Path = inTests("Anchor", "Lib", "Failures")
 local THROWER: outcome.Path = inTests("Utils", "Thrower")
 
--- One of each thing the results window has to show, in the shape the lib returns
 local SAMPLE_RESULTS: { outcome.SpecResult } = {
     {
         path = inTests("Lib", "Empty.spec"),
@@ -69,9 +66,9 @@ local SAMPLE_RESULTS: { outcome.SpecResult } = {
                 name = "points at the helper that threw",
                 groups = {},
                 failure = {
-                    message = "ReplicatedStorage.Tests.Utils.Thrower:3: thrown from a helper",
+                    message = "ReplicatedStorage.Tests.Utils.Thrower:2: thrown from a helper",
                     source = THROWER,
-                    line = 3,
+                    line = 2,
                     trace = "",
                 },
             },
@@ -152,7 +149,6 @@ local function dim(name: string): outcome.Cell
     return { kind = "cell", text = name, align = "left", tone = "dim" }
 end
 
--- One of each piece an adapter can add under the specs, as a coverage report would use them
 local SAMPLE_APPENDIX: outcome.Appendix = {
     { kind = "heading", text = "Lines run by folder" },
     {
@@ -199,11 +195,9 @@ local SAMPLE_APPENDIX: outcome.Appendix = {
 
 local SAMPLE_RUN: outcome.Run = { kind = "results", specs = SAMPLE_RESULTS, appendix = SAMPLE_APPENDIX }
 
--- Shows the control window without and with results from the CLI, sharing one checkbox state, beside the results window
 local function story(target: Frame): () -> ()
     local scope: flux.Scope = flux.scope()
 
-    -- Starts on the theme Studio is using, and from then on shows whichever the button below picks
     local shownTheme: flux.Value<StudioTheme> = scope:value(studio.Theme)
     theme.provide(scope, studioColors(scope, shownTheme))
 
@@ -227,7 +221,6 @@ local function story(target: Frame): () -> ()
                     connected:set(not flux.peek(connected))
                 end,
 
-                -- Stands in for a new result arriving from the CLI, so the dot can be brought back
                 testActivated = function(): ()
                     cliResults:set("unseen")
                 end,
@@ -262,7 +255,6 @@ local function story(target: Frame): () -> ()
                 Padding = UDim.new(0, GAP),
             },
 
-            -- Rebuilt on each switch, since its text says which theme a press leads to
             scope:computed(function(use: flux.Use, inner: flux.Scope): TextButton
                 local dark: boolean = use(isDark)
 

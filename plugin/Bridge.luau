@@ -1,6 +1,5 @@
 local httpService = game:GetService("HttpService")
 
--- The names leading from `game` to an instance; never joined, since a name can hold dots
 export type Path = { string }
 
 export type File = {
@@ -16,7 +15,6 @@ export type RunOffer = {
     files: { File },
     specs: { Path },
 
-    -- Not sent by the CLI: the port the offer was read from, which is where its answers go
     port: number,
 }
 
@@ -41,15 +39,12 @@ export type Collected = {
     sources: { Source },
 }
 
--- The CLI takes the first of these that is free, so the two lists have to stay the same
 local PORTS: { number } = { 37100, 37101 }
 
--- Raised whenever the plugin and the CLI would stop understanding each other
 local PROTOCOL: number = 3
 
 type Method = "GET" | "POST"
 
--- Returns whether the CLI accepted the request, and what it answered
 local function send(port: number, method: Method, route: string, body: { [string]: any }?): (boolean, string)
     local url: string = `http://127.0.0.1:{port}{route}`
 
@@ -73,7 +68,6 @@ local function send(port: number, method: Method, route: string, body: { [string
     return response.Success, response.Body
 end
 
--- Answers an offer, naming its run so the CLI can tell the message isn't for an earlier one
 local function post(offer: Offer, route: string, message: { [string]: any }): boolean
     message.runId = offer.runId
     return (send(offer.port, "POST", route, message))
@@ -84,7 +78,6 @@ local bridge = {}
 bridge.PORTS = PORTS
 bridge.PROTOCOL = PROTOCOL
 
--- What the litmus run on this port is offering, or nil when no run is there
 function bridge.offer(port: number): Offer?
     local ok: boolean, body: string = send(port, "GET", "/offer")
     if not ok then
@@ -100,7 +93,6 @@ function bridge.offer(port: number): Offer?
     return offer
 end
 
--- False when another place took the run first
 function bridge.claim(offer: Offer): boolean
     return post(offer, "/claim", { place = game.Name })
 end

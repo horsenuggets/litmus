@@ -12,17 +12,14 @@ local studioColors = require("@self/Interface/StudioColors")
 local theme = require("@self/Interface/Theme")
 local watcher = require("@self/Watcher")
 
--- Where a run was started from, which the results window's title says
 type Origin = "Test" | "CLI" | "Standalone"
 
--- What the results window is showing
 type Shown = {
     origin: Origin,
     ran: outcome.Run,
     sourceAt: sources.Reader,
 }
 
--- The latest run carried out for a CLI or collected from one, and whether it has been opened since
 type CliRun = {
     arrived: watcher.Arrival,
     seen: boolean,
@@ -32,18 +29,14 @@ local CONNECTED_SETTING: string = "Connected"
 
 local NOTHING_RAN: outcome.Run = { kind = "results", specs = {} }
 
--- A play test starts its own copy of every plugin, and the test place holds a copy of this script as well; only
--- the copy editing the place should do anything, so nothing a plugin alone may use comes before this
 if not runService:IsEdit() then
     return
 end
 
 local studio: Studio = settings().Studio
 
--- Docked beside Rojo's window by default, and the same size, so the two can share a slot
 local controlWindowInfo: DockWidgetPluginGuiInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 320, 210, 300, 210)
 
--- Always starts shut, since it has nothing to show until a run happens
 local resultsWindowInfo: DockWidgetPluginGuiInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Float, false, true, 560, 640, 360, 300)
 
 local function themedIcon(): string
@@ -76,7 +69,6 @@ studio.ThemeChanged:Connect(function(): ()
     button.Icon = themedIcon()
 end)
 
--- Whether this place answers `litmus test`; this holds whether or not the control window is showing
 local connected: flux.Value<boolean> = scope:value(plugin:GetSetting(CONNECTED_SETTING) == true)
 
 local shown: flux.Value<Shown?> = scope:value(nil :: Shown?)
@@ -105,7 +97,6 @@ end
 local function cliRan(arrived: watcher.Arrival): ()
     local showing: Shown? = flux.peek(shown)
 
-    -- A window already open on the CLI's results takes the new ones at once, which leaves nothing unseen
     local seen: boolean = resultsWindow.Enabled and showing ~= nil and showing.origin ~= "Test"
     cliRun:set({ arrived = arrived, seen = seen })
 
@@ -151,7 +142,6 @@ results(scope, {
     end),
 }).Parent = resultsWindow
 
--- The one place the checkbox's state takes effect, both when it changes and when the plugin loads
 scope:effect(function(use: flux.Use): ()
     local now: boolean = use(connected)
 
@@ -164,7 +154,6 @@ scope:effect(function(use: flux.Use): ()
     end
 end)
 
--- Studio brings the control window back as it was left, so the button starts from the window and follows it
 button:SetActive(controlWindow.Enabled)
 
 button.Click:Connect(function(): ()

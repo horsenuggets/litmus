@@ -1,7 +1,5 @@
--- The names leading to a script from the top of the place
 export type Path = { string }
 
--- The lib's results, as it returns them
 export type Failure = {
     message: string,
     source: Path,
@@ -55,7 +53,6 @@ export type Piece =
 
 export type Appendix = { Piece }
 
--- What came of a run: its results, or why there are none
 export type Run =
     { kind: "results", specs: { SpecResult }, appendix: Appendix?, failure: string? }
     | { kind: "problem", message: string }
@@ -83,7 +80,6 @@ function outcome.ofLib(ran: LibRun): Run
     return { kind = "results", specs = ran.specs, appendix = ran.appendix, failure = ran.failure }
 end
 
--- A run that couldn't happen has no specs to show, which is what everything counting them should see
 function outcome.specsOf(ran: Run): { SpecResult }
     return if ran.kind == "results" then ran.specs else {}
 end
@@ -100,7 +96,6 @@ function outcome.failedCount(tests: { TestResult }): number
     return failed
 end
 
--- A spec that didn't load is an error, apart from one that loaded and had a test fail
 function outcome.statusOf(spec: SpecResult): Status
     if spec.failure then
         return "ERROR"
@@ -139,7 +134,6 @@ function outcome.specCount(tally: Tally, status: Status): number
     return if status == "FAIL" then tally.failedSpecs else tally.passedSpecs
 end
 
--- The specs with something wrong, then the ones that passed, each in the order they ran; `only` keeps one status
 function outcome.arranged(results: { SpecResult }, only: Status?): ({ SpecResult }, { SpecResult })
     local wrong: { SpecResult } = {}
     local passed: { SpecResult } = {}

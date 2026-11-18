@@ -5,7 +5,6 @@ local label = require("./Components/Label")
 local textButton = require("./Components/TextButton")
 local theme = require("./Theme")
 
--- Whether there are results from a CLI's run to open, and if so whether they have been opened yet
 export type CliResults = "none" | "unseen" | "seen"
 
 export type Props = {
@@ -14,7 +13,6 @@ export type Props = {
 
     testActivated: () -> (),
 
-    -- The button for the CLI's results exists only while there are some, and carries a dot until they are opened
     cliResults: flux.UsedAs<CliResults>,
     cliResultsActivated: () -> (),
 }
@@ -29,11 +27,9 @@ local LOGO_SIZE: number = 28
 local CONNECT_ROW_HEIGHT: number = 36
 local BUTTON_ROW_HEIGHT: number = 34
 
--- What the control window holds, built into whatever it is parented to
 local function control(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
 
-    -- Rebuilt only when results appear or go, and not when they are merely seen
     local hasCliResults: flux.Computed<boolean> = scope:computed(function(use: flux.Use): boolean
         return use(props.cliResults) ~= "none"
     end)

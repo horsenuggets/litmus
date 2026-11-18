@@ -10,25 +10,21 @@ local words = require("../Words")
 export type Props = {
     tally: flux.Computed<outcome.Tally>,
 
-    -- The outcome the list is narrowed to, if any; pressing an outcome's chip asks to change it
     selected: flux.Computed<outcome.Status?>,
     statusActivated: (status: outcome.Status) -> (),
 }
 
--- The order the outcomes are shown in, with what needs attention first
 local STATUSES: { outcome.Status } = { "FAIL", "ERROR", "PASS" }
 
 local STRIP_HEIGHT: number = 40
 local BAR_HEIGHT: number = 4
 local BAR_GAP: number = 6
 
--- Where the strip's content starts and ends, which the bar under it keeps to as well
 local INSET: number = 16
 
 local CHIP_GAP: number = 4
 local ICON_GAP: number = 6
 
--- How the run went at a glance: each outcome's count of specs, the tests in a line, and the proportions as a bar
 local function summary(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
     local tally: flux.Computed<outcome.Tally> = props.tally
@@ -39,7 +35,6 @@ local function summary(scope: flux.Scope, props: Props): Frame
         end)
     end
 
-    -- With nothing wrong there is nothing to pick between, so the chips give way to one line saying so
     local allPassed: flux.Computed<boolean> = scope:computed(function(use: flux.Use): boolean
         local counted: outcome.Tally = use(tally)
         return counted.passedSpecs > 0 and counted.failedSpecs + counted.erroredSpecs == 0
@@ -73,7 +68,6 @@ local function summary(scope: flux.Scope, props: Props): Frame
             AutomaticSize = Enum.AutomaticSize.X,
             Size = UDim2.fromScale(0, 1),
 
-            -- Sits where a chip's dot would, since it has no chip around it to pad it
             building:element "UIPadding" { PaddingLeft = UDim.new(0, theme.rowPadding) },
 
             building:element "UIListLayout" {
@@ -120,7 +114,6 @@ local function summary(scope: flux.Scope, props: Props): Frame
 
             scope:element "UICorner" {},
 
-            -- Segments share the bar's width in proportion to their counts
             scope:element "UIFlexItem" {
                 FlexMode = Enum.UIFlexMode.Custom,
                 GrowRatio = count,
@@ -143,7 +136,6 @@ local function summary(scope: flux.Scope, props: Props): Frame
             Size = UDim2.new(1, 0, 0, STRIP_HEIGHT),
 
             scope:element "UIPadding" {
-                -- A chip pads its own dot, which is what should land on the inset
                 PaddingLeft = UDim.new(0, INSET - theme.rowPadding),
                 PaddingRight = UDim.new(0, INSET),
             },
@@ -175,7 +167,6 @@ local function summary(scope: flux.Scope, props: Props): Frame
                     local counted: outcome.Tally = use(tally)
                     local parts: { string } = { words.plural(counted.failedTests + counted.passedTests, "test") }
 
-                    -- With no test failed, the total alone already says they all passed
                     if counted.failedTests > 0 then
                         table.insert(parts, `<font color="#{use(colors.fail):ToHex()}">{counted.failedTests} failed</font>`)
                         table.insert(parts, `<font color="#{use(colors.pass):ToHex()}">{counted.passedTests} passed</font>`)
@@ -194,7 +185,6 @@ local function summary(scope: flux.Scope, props: Props): Frame
             },
         },
 
-        -- Stands in for a line between the strip and the list
         scope:element "Frame" {
             Name = "Bar",
 

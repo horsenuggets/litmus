@@ -3,7 +3,6 @@ local icon = require("../Components/Icon")
 local outcome = require("../../Outcome")
 local theme = require("../Theme")
 
--- How an outcome is shown, wherever it is shown
 export type Style = {
     icon: icon.Name,
     word: string,

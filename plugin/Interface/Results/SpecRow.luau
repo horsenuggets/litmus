@@ -13,7 +13,6 @@ local words = require("../Words")
 export type Props = {
     spec: outcome.SpecResult,
 
-    -- The start of the spec's path that every spec shares, which the row leaves out
     root: outcome.Path,
 
     layoutOrder: number?,
@@ -21,7 +20,6 @@ export type Props = {
 
 local HEIGHT: number = 30
 
--- Room under a spec's own failure, before its tests or the next row
 local FAILURE_BOTTOM: number = 4
 
 local function specRow(scope: flux.Scope, props: Props): Frame
@@ -39,7 +37,6 @@ local function specRow(scope: flux.Scope, props: Props): Frame
 
         height = HEIGHT,
 
-        -- A spec with something wrong opens by itself; the rest wait to be asked
         startsOpen = status ~= "PASS",
 
         head = {
@@ -59,7 +56,6 @@ local function specRow(scope: flux.Scope, props: Props): Frame
                 color = colors.brightText,
             }),
 
-            -- Takes whatever width the rest leave, which pushes the note to the right edge
             label(scope, {
                 layoutOrder = 3,
                 truncated = true,
@@ -85,7 +81,6 @@ local function specRow(scope: flux.Scope, props: Props): Frame
                 local built: { Instance } = {}
 
                 if specFailure then
-                    -- Padded as the rows around it are, so the box starts under the spec's icon
                     table.insert(built, inner:element "Frame" {
                         Name = "Failure",
                         LayoutOrder = 1,

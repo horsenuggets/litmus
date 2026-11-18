@@ -10,7 +10,6 @@ local wrappedText = require("../Components/WrappedText")
 export type Props = {
     failure: outcome.Failure,
 
-    -- The outcome's colour, which marks the line the failure points at
     color: flux.UsedAs<Color3>,
 }
 
@@ -23,7 +22,6 @@ local CODE_NUMBER_WIDTH: number = 32
 local CODE_GAP: number = 12
 local CODE_CORNER: UDim = UDim.new(0, 3)
 
--- Luau starts a thrown message with where it was thrown, which the location below it already says
 local function tidy(failure: outcome.Failure): string
     local message: string = failure.message
 
@@ -35,7 +33,6 @@ local function tidy(failure: outcome.Failure): string
     return words.untagged(message)
 end
 
--- What went wrong, the code it points at, and where that is; as wide as whatever holds it
 local function failureBox(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
     local failure: outcome.Failure = props.failure
@@ -87,7 +84,6 @@ local function failureBox(scope: flux.Scope, props: Props): Frame
         }
     end
 
-    -- Read as the box is built, so a script edited since the run shows as it is now
     local source: string? = sources.read(scope, failure.source)
 
     local codeLines: { Frame } = {}
@@ -104,7 +100,6 @@ local function failureBox(scope: flux.Scope, props: Props): Frame
         AutomaticSize = Enum.AutomaticSize.Y,
         Size = UDim2.fromScale(1, 0),
 
-        -- The box sits in by its stroke, which is drawn outside it and would be cut off by whatever clips this
         scope:element "UIPadding" {
             PaddingLeft = UDim.new(0, STROKE),
             PaddingRight = UDim.new(0, STROKE),

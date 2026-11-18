@@ -10,7 +10,6 @@ export type Props = {
     text: string,
     color: flux.UsedAs<Color3>,
 
-    -- Shown under the text and as wide as it
     children: any?,
 
     layoutOrder: number?,
@@ -19,10 +18,8 @@ export type Props = {
 local PADDING: number = 4
 local GAP: number = 6
 
--- The text starts past the icon, as the text of a row's head starts past its arrow
 local TEXT_INDENT: number = theme.iconSize + theme.rowGap
 
--- An icon with text beside it that wraps, padded to line up with the heads of the rows around it
 local function iconLine(scope: flux.Scope, props: Props): Frame
     return scope:element "Frame" {
         Name = props.text,
@@ -68,7 +65,6 @@ local function iconLine(scope: flux.Scope, props: Props): Frame
                 color = props.color,
             }),
 
-            -- Held in a frame of their own, so whatever is passed in needs no layout order to land under the text
             if props.children
                 then scope:element "Frame" {
                     Name = "Under",
