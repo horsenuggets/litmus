@@ -1,6 +1,7 @@
 local button = require("../../Packages/Interface/Hooks/Button")
 local flux = require("../../Packages/Flux")
 local icon = require("./Icon")
+local outline = require("./Outline")
 local ripple = require("./Ripple")
 local theme = require("../Theme")
 
@@ -64,15 +65,7 @@ local function checkbox(scope: flux.Scope, props: Props): TextButton
 
         press.start,
 
-        scope:element "Frame" {
-            Name = "Outline",
-            ZIndex = 1,
-
-            Size = UDim2.new(1, -theme.stroke * 2, 1, -theme.stroke * 2),
-
-            scope:element "UICorner" { CornerRadius = theme.cornerRadius },
-            scope:element "UIStroke" { Color = colors.border, Thickness = theme.stroke },
-        },
+        outline(scope, { zIndex = 1 }),
 
         scope:hydrate(cross) { ZIndex = 2 },
 

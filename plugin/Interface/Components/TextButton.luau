@@ -1,6 +1,7 @@
 local button = require("../../Packages/Interface/Hooks/Button")
 local flux = require("../../Packages/Flux")
 local highlight = require("./Highlight")
+local outline = require("./Outline")
 local ripple = require("./Ripple")
 local theme = require("../Theme")
 
@@ -79,15 +80,7 @@ local function textButton(scope: flux.Scope, props: Props): TextButton
                 scope:element "UICorner" { CornerRadius = theme.cornerRadius },
                 scope:element "UIGradient" { Color = theme.brandGradient },
             }
-            else scope:element "Frame" {
-                Name = "Outline",
-                ZIndex = 1,
-
-                Size = UDim2.new(1, -theme.stroke * 2, 1, -theme.stroke * 2),
-
-                scope:element "UICorner" { CornerRadius = theme.cornerRadius },
-                scope:element "UIStroke" { Color = colors.border, Thickness = theme.stroke },
-            },
+            else outline(scope, { zIndex = 1 }),
 
         scope:hydrate(hover) { ZIndex = 2 },
 
