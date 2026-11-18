@@ -53,10 +53,7 @@ mod tests {
         let dir = project(name, files);
         let roots: Vec<String> = roots.iter().map(|root| (*root).to_owned()).collect();
 
-        let specs = find(&dir, &roots);
-        fs::remove_dir_all(&dir).unwrap();
-
-        specs
+        find(&dir, &roots)
     }
 
     #[test]

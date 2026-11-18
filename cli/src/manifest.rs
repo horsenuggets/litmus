@@ -141,6 +141,7 @@ fn hash_without_carriage_returns(source: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::TempProject;
 
     const SOURCEMAP: &str = r#"{
         "name": "demo",
@@ -157,12 +158,13 @@ mod tests {
         }]
     }"#;
 
-    fn project(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("litmus-{}-{name}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("Thing.luau"), "return 1\r\n").unwrap();
-        fs::write(dir.join("Thing.spec.luau"), "return 1\n").unwrap();
-        fs::write(dir.join("Data.json"), "{}").unwrap();
+    fn project(name: &str) -> TempProject {
+        let dir = TempProject::new(name);
+
+        dir.write("Thing.luau", "return 1\r\n");
+        dir.write("Thing.spec.luau", "return 1\n");
+        dir.write("Data.json", "{}");
+
         dir
     }
 
@@ -178,7 +180,6 @@ mod tests {
     fn lists_luau_files_by_instance_path() {
         let dir = project("lists");
         let manifest = Manifest::from_sourcemap(SOURCEMAP.as_bytes(), &dir).unwrap();
-        fs::remove_dir_all(&dir).unwrap();
 
         let paths: Vec<String> = manifest.scripts.iter().map(|script| script.path.join("/")).collect();
 
@@ -191,7 +192,6 @@ mod tests {
     fn narrows_to_the_specs_a_selection_names_and_keeps_every_other_script() {
         let dir = project("narrows");
         let mut manifest = Manifest::from_sourcemap(SOURCEMAP.as_bytes(), &dir).unwrap();
-        fs::remove_dir_all(&dir).unwrap();
 
         let nowhere = Selection::of(&["Other.spec.luau".to_owned()]).unwrap();
         assert!(manifest.narrow(&nowhere).is_err());
@@ -209,7 +209,6 @@ mod tests {
     fn ignores_line_endings() {
         let dir = project("endings");
         let manifest = Manifest::from_sourcemap(SOURCEMAP.as_bytes(), &dir).unwrap();
-        fs::remove_dir_all(&dir).unwrap();
 
         assert_eq!(manifest.scripts[0].hash, manifest.scripts[1].hash);
     }

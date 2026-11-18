@@ -253,13 +253,14 @@ fn bar(parts: &[Part]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::without_colour;
 
     fn plain(pieces: &str) -> Vec<String> {
         let pieces: Vec<Piece> = serde_json::from_str(pieces).unwrap();
 
         render(&pieces)
             .iter()
-            .map(|line| anstream::adapter::strip_str(line).to_string())
+            .map(|line| without_colour(line))
             .collect()
     }
 

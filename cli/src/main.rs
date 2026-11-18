@@ -13,6 +13,8 @@ mod server;
 mod show;
 mod standalone;
 mod style;
+#[cfg(test)]
+mod testing;
 
 use config::Config;
 use manifest::Manifest;

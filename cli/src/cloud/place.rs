@@ -63,6 +63,7 @@ fn allow_loadstring(place: &[u8]) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::TempProject;
     use rbx_dom_weak::{Instance, WeakDom};
 
     fn place(services: Vec<InstanceBuilder>) -> Vec<u8> {
@@ -112,11 +113,11 @@ mod tests {
 
     #[test]
     fn reads_a_place_built_elsewhere() {
-        let file = env::temp_dir().join(format!("litmus-{}-reads.rbxl", process::id()));
+        let project = TempProject::new("reads");
+        let file = project.join("place.rbxl");
         fs::write(&file, place(vec![InstanceBuilder::new("ReplicatedStorage")])).unwrap();
 
         let allowed = read(&file);
-        fs::remove_file(&file).unwrap();
 
         let dom = rbx_binary::from_reader(allowed.unwrap().as_slice()).unwrap();
 

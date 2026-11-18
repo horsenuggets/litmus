@@ -60,15 +60,14 @@ fn name_of(project_dir: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::TempProject;
     use serde::Deserialize;
     use serde_json::json;
-    use std::env;
 
     #[test]
     fn the_files_failures_name_go_along_with_the_results() {
-        let project_dir = env::temp_dir().join(format!("litmus-show-{}", std::process::id()));
-        fs::create_dir_all(project_dir.join("tests")).unwrap();
-        fs::write(project_dir.join("tests/a.spec.luau"), "error()\n").unwrap();
+        let project_dir = TempProject::new("show");
+        project_dir.write("tests/a.spec.luau", "error()\n");
 
         let failure = |file: &str| json!({ "message": "m", "source": ["tests", file], "line": 1 });
         let results = json!({ "specs": [
@@ -78,7 +77,6 @@ mod tests {
         let run = Run::deserialize(&results).unwrap();
 
         let shown = serde_json::to_value(shown(&project_dir, &results, &run)).unwrap();
-        fs::remove_dir_all(&project_dir).unwrap();
 
         assert_eq!(shown["results"], results);
         assert_eq!(
@@ -89,13 +87,10 @@ mod tests {
 
     #[test]
     fn a_project_goes_by_the_name_of_its_folder() {
-        let project_dir = env::temp_dir().join(format!("litmus-named-{}", std::process::id()));
-        fs::create_dir_all(&project_dir).unwrap();
-
+        let project_dir = TempProject::new("named");
         let name = name_of(&project_dir);
-        fs::remove_dir_all(&project_dir).unwrap();
 
-        assert_eq!(name, format!("litmus-named-{}", std::process::id()));
+        assert_eq!(name, format!("litmus-{}-named", std::process::id()));
         assert_eq!(name_of(Path::new("nowhere/at/all")), "a project");
     }
 }

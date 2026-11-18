@@ -87,7 +87,7 @@ fn is_flag(flag: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use crate::testing::TempProject;
 
     pub(super) fn standalone() -> Standalone {
         Standalone {
@@ -99,13 +99,11 @@ mod tests {
         }
     }
 
-    pub(super) fn project(name: &str, files: &[&str]) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("litmus-{}-standalone-{name}", std::process::id()));
+    pub(super) fn project(name: &str, files: &[&str]) -> TempProject {
+        let dir = TempProject::new(&format!("standalone-{name}"));
 
         for file in files {
-            let file = dir.join(file);
-            fs::create_dir_all(file.parent().unwrap()).unwrap();
-            fs::write(file, "").unwrap();
+            dir.write(file, "");
         }
 
         dir
@@ -163,7 +161,6 @@ mod tests {
 
         let reported = run(&dir, &standalone, &[], &Selection::default());
         let written = fs::read_to_string(dir.join(".litmus/run.luau"));
-        fs::remove_dir_all(&dir).unwrap();
 
         assert_eq!(reported, Ok(serde_json::json!({ "specs": [] })));
         assert!(written.unwrap().contains("\"tests/a.spec.luau\""));
@@ -184,7 +181,6 @@ mod tests {
 
         let started = std::time::Instant::now();
         let reported = run(&dir, &standalone, &[], &Selection::default());
-        fs::remove_dir_all(&dir).unwrap();
 
         assert_eq!(reported, Ok(serde_json::json!({ "specs": [] })));
         assert!(started.elapsed() < std::time::Duration::from_secs(30), "{:?}", started.elapsed());
@@ -200,7 +196,6 @@ mod tests {
         };
 
         let problem = run(&dir, &standalone, &[], &Selection::default()).unwrap_err();
-        fs::remove_dir_all(&dir).unwrap();
 
         assert!(problem.contains("without reporting any results"), "{problem}");
     }

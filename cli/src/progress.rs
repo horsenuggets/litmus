@@ -227,6 +227,7 @@ fn write(text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::without_colour;
 
     fn progress() -> Progress {
         Progress::new(vec!["tests/a.spec.luau".to_owned(), "tests/longer.spec.luau".to_owned()])
@@ -236,7 +237,7 @@ mod tests {
         progress
             .lines(Duration::from_secs(seconds))
             .iter()
-            .map(|line| anstream::adapter::strip_str(line).to_string())
+            .map(|line| without_colour(line))
             .collect()
     }
 

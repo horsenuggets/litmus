@@ -68,10 +68,7 @@ fn plugins_folder() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn folder(name: &str) -> PathBuf {
-        env::temp_dir().join(format!("litmus-{}-{name}", std::process::id())).join("Plugins")
-    }
+    use crate::testing::TempProject;
 
     #[test]
     fn carries_a_binary_model() {
@@ -80,10 +77,11 @@ mod tests {
 
     #[test]
     fn installs_into_a_folder_that_is_not_there_yet() {
-        let folder = folder("installs");
+        let project = TempProject::new("installs");
+        let folder = project.join("Plugins");
+
         let file = install_into(&folder).unwrap();
         let written = fs::read(&file).unwrap();
-        fs::remove_dir_all(folder.parent().unwrap()).unwrap();
 
         assert_eq!(file, folder.join(FILE_NAME));
         assert!(written == PLUGIN);
@@ -91,13 +89,13 @@ mod tests {
 
     #[test]
     fn uninstalls_only_what_is_installed() {
-        let folder = folder("uninstalls");
+        let project = TempProject::new("uninstalls");
+        let folder = project.join("Plugins");
         install_into(&folder).unwrap();
 
         let first = uninstall_from(&folder);
         let second = uninstall_from(&folder);
         let left = folder.join(FILE_NAME).exists();
-        fs::remove_dir_all(folder.parent().unwrap()).unwrap();
 
         assert_eq!(first, Ok(true));
         assert_eq!(second, Ok(false));

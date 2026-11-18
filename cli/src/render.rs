@@ -214,6 +214,7 @@ mod tests {
     use super::*;
     use crate::manifest::Script;
     use crate::piece::Piece;
+    use crate::testing::without_colour;
 
     fn manifest() -> Manifest {
         let script = |name: &str, file: &str| Script {
@@ -250,7 +251,7 @@ mod tests {
     }
 
     fn plain_run(run: &Run, columns: Option<usize>) -> String {
-        anstream::adapter::strip_str(&super::run(run, &Sources::of(&manifest()), columns)).to_string()
+        without_colour(&super::run(run, &Sources::of(&manifest()), columns))
     }
 
     #[test]
@@ -330,7 +331,7 @@ mod tests {
         };
 
         let run = run(r#"[{ "path": ["Shared", "Util", "spec"], "tests": [] }]"#, None);
-        let text = anstream::adapter::strip_str(&super::run(&run, &Sources::of(&manifest), None)).to_string();
+        let text = without_colour(&super::run(&run, &Sources::of(&manifest), None));
 
         assert!(text.contains("src/Util/spec.luau"), "{text}");
     }
@@ -427,7 +428,7 @@ Coverage 4%
             } }] }]"#,
             None,
         );
-        let text = anstream::adapter::strip_str(&super::run(&run, &Sources::Disk, None)).to_string();
+        let text = without_colour(&super::run(&run, &Sources::Disk, None));
 
         let expected = "
   FAIL    tests/Bad.spec.luau  0 of 1 passed
