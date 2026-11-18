@@ -10,11 +10,9 @@ end
 
 test("refuses a path that starts nowhere", function(): ()
     local failure: litmus.Failure = refusalOf("BadPath")
+    local refusal: string = `[Litmus]: can't require "@pkg/Thing": "@pkg" leads nowhere; a path starts with ./, ../, @self or @game`
 
-    expect.equal(
-        failure.message,
-        `[Litmus]: can't require "@pkg/Thing": "@pkg" leads nowhere; a path starts with ./, ../, @self or @game`
-    )
+    expect.equal(failure.message, refusal)
     expect.same(failure.source, { "Loader", "BadPath.spec" })
     expect.equal(failure.line, 1)
 end)
@@ -29,11 +27,9 @@ end)
 
 test("names the modules that require each other in a cycle", function(): ()
     local failure: litmus.Failure = refusalOf("Cycle")
+    local refusal: string = "[Litmus]: modules require each other in a cycle: Loader.CycleA -> Loader.CycleB -> Loader.CycleA"
 
-    expect.equal(
-        failure.message,
-        "[Litmus]: modules require each other in a cycle: Loader.CycleA -> Loader.CycleB -> Loader.CycleA"
-    )
+    expect.equal(failure.message, refusal)
     expect.same(failure.source, { "Loader", "CycleB" })
     expect.equal(failure.line, 1)
 end)

@@ -86,6 +86,6 @@ test("runs the afters registered before a spec failed to load, and reports none 
     end))
 
     expect.equal(cleaned, true)
-    expect.equal(inline.specs[1].failure ~= nil, true)
+    expect.truthy(inline.specs[1].failure)
     expect.same(inline.specs[1].tests, {})
 end)

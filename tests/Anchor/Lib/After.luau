@@ -33,12 +33,14 @@ group("inner", function(): ()
     local refused: boolean = not pcall(after, "never registered", function(): () end)
 
     test("refuses an after registered inside a group", function(): ()
-        expect.equal(refused, true)
+        expect.truthy(refused)
     end)
 end)
 
 test("refuses an after registered while tests run", function(): ()
-    expect.error(function(): ()
+    local function registerLate(): ()
         after("never registered", function(): () end)
-    end)
+    end
+
+    expect.error(registerLate)
 end)

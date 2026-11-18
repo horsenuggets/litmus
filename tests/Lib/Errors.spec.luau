@@ -26,7 +26,7 @@ test("finds the line of an error the engine raised", function(): ()
 end)
 
 test("gives every failure a trace", function(): ()
-    expect.equal(anchor.failureOf(spec, "reports a thrown error").trace ~= "", true)
+    expect.never.equal(anchor.failureOf(spec, "reports a thrown error").trace, "")
 end)
 
 test("runs the tests after one that failed", function(): ()
