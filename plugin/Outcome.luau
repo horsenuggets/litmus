@@ -74,6 +74,11 @@ export type Tally = {
     failedTests: number,
 }
 
+export type Arranged = {
+    wrong: { SpecResult },
+    passed: { SpecResult },
+}
+
 local outcome = {}
 
 function outcome.ofLib(ran: LibRun): Run
@@ -134,7 +139,7 @@ function outcome.specCount(tally: Tally, status: Status): number
     return if status == "FAIL" then tally.failedSpecs else tally.passedSpecs
 end
 
-function outcome.arranged(results: { SpecResult }, only: Status?): ({ SpecResult }, { SpecResult })
+function outcome.arranged(results: { SpecResult }, only: Status?): Arranged
     local wrong: { SpecResult } = {}
     local passed: { SpecResult } = {}
 
@@ -148,7 +153,7 @@ function outcome.arranged(results: { SpecResult }, only: Status?): ({ SpecResult
         table.insert(if status == "PASS" then passed else wrong, spec)
     end
 
-    return wrong, passed
+    return { wrong = wrong, passed = passed }
 end
 
 return outcome

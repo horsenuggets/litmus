@@ -88,27 +88,21 @@ end)
 
 group("arranged", function(): ()
     test("puts the specs with something wrong first, each kind in the order it ran", function(): ()
-        local wrong: { outcome.SpecResult }, passed: { outcome.SpecResult } =
-            outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED })
+        local arranged: outcome.Arranged = outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED })
 
-        expect.same(wrong, { FAILED, ERRORED })
-        expect.same(passed, { PASSED, EMPTY })
+        expect.same(arranged, { wrong = { FAILED, ERRORED }, passed = { PASSED, EMPTY } })
     end)
 
     test("keeps one status when asked for it", function(): ()
-        local wrong: { outcome.SpecResult }, passed: { outcome.SpecResult } =
-            outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED }, "FAIL")
+        local arranged: outcome.Arranged = outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED }, "FAIL")
 
-        expect.same(wrong, { FAILED })
-        expect.same(passed, {})
+        expect.same(arranged, { wrong = { FAILED }, passed = {} })
     end)
 
     test("keeps the passing specs when asked for those", function(): ()
-        local wrong: { outcome.SpecResult }, passed: { outcome.SpecResult } =
-            outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED }, "PASS")
+        local arranged: outcome.Arranged = outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED }, "PASS")
 
-        expect.same(wrong, {})
-        expect.same(passed, { PASSED, EMPTY })
+        expect.same(arranged, { wrong = {}, passed = { PASSED, EMPTY } })
     end)
 end)
 

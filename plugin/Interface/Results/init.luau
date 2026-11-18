@@ -116,16 +116,16 @@ local function results(scope: flux.Scope, props: Props): Frame
         end
 
         local root: outcome.Path = paths.sharedParent(specPaths)
-        local wrong: { outcome.SpecResult }, passed: { outcome.SpecResult } = outcome.arranged(ran.specs, only)
+        local arranged: outcome.Arranged = outcome.arranged(ran.specs, only)
 
-        if #wrong == 0 then
-            return rowsOf(building, passed, root)
+        if #arranged.wrong == 0 then
+            return rowsOf(building, arranged.passed, root)
         end
 
-        local rows: { Instance } = rowsOf(building, wrong, root)
+        local rows: { Instance } = rowsOf(building, arranged.wrong, root)
 
-        if #passed > 0 then
-            table.insert(rows, foldOf(building, passed, root, #wrong + 1))
+        if #arranged.passed > 0 then
+            table.insert(rows, foldOf(building, arranged.passed, root, #arranged.wrong + 1))
         end
 
         return rows
