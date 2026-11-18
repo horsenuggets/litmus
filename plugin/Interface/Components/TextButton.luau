@@ -45,6 +45,13 @@ local function textButton(scope: flux.Scope, props: Props): TextButton
         pressing = pressing,
     })
 
+    local hover: Frame = highlight(scope, {
+        color = fillColor,
+        opacity = scope:computed(function(use: flux.Use): number
+            return if use(hovering) then fillAlpha else 0
+        end),
+    })
+
     return scope:element "TextButton" {
         Name = props.text,
         LayoutOrder = props.layoutOrder,
@@ -83,12 +90,7 @@ local function textButton(scope: flux.Scope, props: Props): TextButton
                 scope:element "UIStroke" { Color = colors.border, Thickness = STROKE },
             },
 
-        scope:hydrate(highlight(scope, {
-            color = fillColor,
-            opacity = scope:computed(function(use: flux.Use): number
-                return if use(hovering) then fillAlpha else 0
-            end),
-        })) { ZIndex = 2 },
+        scope:hydrate(hover) { ZIndex = 2 },
 
         scope:element "TextLabel" {
             Name = "Label",

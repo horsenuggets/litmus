@@ -121,6 +121,25 @@ local function summary(scope: flux.Scope, props: Props): Frame
         }
     end
 
+    local testCounts: TextLabel = label(scope, {
+        richText = true,
+
+        text = scope:computed(function(use: flux.Use): string
+            local counted: outcome.Tally = use(tally)
+            local parts: { string } = { words.plural(counted.failedTests + counted.passedTests, "test") }
+
+            if counted.failedTests > 0 then
+                table.insert(parts, `<font color="#{use(colors.fail):ToHex()}">{counted.failedTests} failed</font>`)
+                table.insert(parts, `<font color="#{use(colors.pass):ToHex()}">{counted.passedTests} passed</font>`)
+            end
+
+            return table.concat(parts, "  ·  ")
+        end),
+        font = theme.mainFont,
+        size = theme.smallTextSize,
+        color = colors.subText,
+    })
+
     return scope:element "Frame" {
         Name = "Summary",
 
@@ -160,24 +179,7 @@ local function summary(scope: flux.Scope, props: Props): Frame
                 end),
             },
 
-            scope:hydrate(label(scope, {
-                richText = true,
-
-                text = scope:computed(function(use: flux.Use): string
-                    local counted: outcome.Tally = use(tally)
-                    local parts: { string } = { words.plural(counted.failedTests + counted.passedTests, "test") }
-
-                    if counted.failedTests > 0 then
-                        table.insert(parts, `<font color="#{use(colors.fail):ToHex()}">{counted.failedTests} failed</font>`)
-                        table.insert(parts, `<font color="#{use(colors.pass):ToHex()}">{counted.passedTests} passed</font>`)
-                    end
-
-                    return table.concat(parts, "  ·  ")
-                end),
-                font = theme.mainFont,
-                size = theme.smallTextSize,
-                color = colors.subText,
-            })) {
+            scope:hydrate(testCounts) {
                 Name = "Tests",
 
                 AnchorPoint = Vector2.new(1, 0.5),

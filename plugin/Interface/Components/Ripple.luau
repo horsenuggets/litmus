@@ -27,9 +27,11 @@ local function ripple(scope: flux.Scope, props: Props): Ripple
     local target: flux.Value<number> = scope:value(0)
 
     local growth: flux.Spring<number> = scope:spring(target, GROW_SPEED, GROW_DAMPING)
-    local opacity: flux.Spring<number> = scope:spring(scope:computed(function(use: flux.Use): number
+    local opacityTarget: flux.Computed<number> = scope:computed(function(use: flux.Use): number
         return if use(props.pressing) then 1 else 0
-    end), FADE_SPEED)
+    end)
+
+    local opacity: flux.Spring<number> = scope:spring(opacityTarget, FADE_SPEED)
 
     local function start(listening: flux.Scope, button: GuiButton): ()
         listening:insert(button.InputBegan:Connect(function(input: InputObject): ()

@@ -40,9 +40,11 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
 
     local built: flux.Value<boolean> = scope:value(flux.peek(open))
 
-    local openness: flux.Spring<number> = scope:spring(scope:computed(function(use: flux.Use): number
+    local opennessTarget: flux.Computed<number> = scope:computed(function(use: flux.Use): number
         return if use(open) then 1 else 0
-    end), OPEN_SPEED, OPEN_DAMPING)
+    end)
+
+    local openness: flux.Spring<number> = scope:spring(opennessTarget, OPEN_SPEED, OPEN_DAMPING)
 
     local contentHeight: flux.Value<number> = scope:value(0)
 

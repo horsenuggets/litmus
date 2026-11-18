@@ -23,9 +23,11 @@ local RIPPLE_ALPHA: number = 0.2
 local function checkbox(scope: flux.Scope, props: Props): TextButton
     local colors: theme.Colors = theme.colors(scope)
 
-    local transparency: flux.Spring<number> = scope:spring(scope:computed(function(use: flux.Use): number
+    local transparencyTarget: flux.Computed<number> = scope:computed(function(use: flux.Use): number
         return if use(props.checked) then 0 else 1
-    end), FADE_SPEED, FADE_DAMPING)
+    end)
+
+    local transparency: flux.Spring<number> = scope:spring(transparencyTarget, FADE_SPEED, FADE_DAMPING)
 
     local pressing: flux.Value<boolean> = scope:value(false)
 
@@ -35,6 +37,19 @@ local function checkbox(scope: flux.Scope, props: Props): TextButton
         end),
         alpha = RIPPLE_ALPHA,
         pressing = pressing,
+    })
+
+    local cross: Frame = icon(scope, {
+        name = "cross",
+        size = ICON_SIZE,
+        gradient = colors.mutedGradient,
+    })
+
+    local check: Frame = icon(scope, {
+        name = "check",
+        size = ICON_SIZE,
+        gradient = theme.onBrandGradient,
+        transparency = transparency,
     })
 
     return scope:element "TextButton" {
@@ -63,11 +78,7 @@ local function checkbox(scope: flux.Scope, props: Props): TextButton
             scope:element "UIStroke" { Color = colors.border, Thickness = STROKE },
         },
 
-        scope:hydrate(icon(scope, {
-            name = "cross",
-            size = ICON_SIZE,
-            gradient = colors.mutedGradient,
-        })) { ZIndex = 2 },
+        scope:hydrate(cross) { ZIndex = 2 },
 
         scope:element "Frame" {
             Name = "Fill",
@@ -79,12 +90,7 @@ local function checkbox(scope: flux.Scope, props: Props): TextButton
             scope:element "UIGradient" { Color = theme.brandGradient },
         },
 
-        scope:hydrate(icon(scope, {
-            name = "check",
-            size = ICON_SIZE,
-            gradient = theme.onBrandGradient,
-            transparency = transparency,
-        })) { ZIndex = 4 },
+        scope:hydrate(check) { ZIndex = 4 },
 
         scope:hydrate(press.layer) { ZIndex = 5 },
     }

@@ -21,6 +21,8 @@ local GAP: number = 6
 local TEXT_INDENT: number = theme.iconSize + theme.rowGap
 
 local function iconLine(scope: flux.Scope, props: Props): Frame
+    local glyph: Frame = icon(scope, { name = props.icon, gradient = props.gradient })
+
     return scope:element "Frame" {
         Name = props.text,
         LayoutOrder = props.layoutOrder,
@@ -35,10 +37,7 @@ local function iconLine(scope: flux.Scope, props: Props): Frame
             PaddingBottom = UDim.new(0, PADDING),
         },
 
-        scope:hydrate(icon(scope, {
-            name = props.icon,
-            gradient = props.gradient,
-        })) {
+        scope:hydrate(glyph) {
             AnchorPoint = Vector2.zero,
             Position = UDim2.new(),
         },
