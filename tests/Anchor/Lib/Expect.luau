@@ -52,7 +52,6 @@ group("error", function(): ()
     end)
 end)
 
--- Added at the end, so the tests above keep the line numbers the anchor expects of them
 group("same", function(): ()
     test("passes on tables that contain themselves", function(): ()
         local first: { [string]: any } = { name = "a" }

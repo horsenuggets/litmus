@@ -1,1 +1,0 @@
--- Registers nothing, to show how a spec without tests is reported

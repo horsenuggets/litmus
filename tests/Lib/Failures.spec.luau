@@ -32,9 +32,9 @@ end)
 test("points at the helper that threw", function(): ()
     local failure: litmus.Failure = anchor.failureOf(spec, "points at the helper that threw")
 
-    expect.equal(failure.message, "ReplicatedStorage.Tests.Utils.Thrower:3: thrown from a helper")
+    expect.equal(failure.message, "ReplicatedStorage.Tests.Utils.Thrower:2: thrown from a helper")
     expect.same(failure.source, { "ReplicatedStorage", "Tests", "Utils", "Thrower" })
-    expect.equal(failure.line, 3)
+    expect.equal(failure.line, 2)
 end)
 
 test("points an error the lib raised at the test that caused it", function(): ()
