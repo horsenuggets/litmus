@@ -45,10 +45,10 @@ local CLI_PROTOCOL: number = 3
 
 type Method = "GET" | "POST"
 
-local function send(port: number, method: Method, route: string, body: { [string]: any }?): (boolean, string)
+local function send(port: number, method: Method, route: string, body: { [string]: any }?): string?
     local url: string = `http://127.0.0.1:{port}{route}`
 
-    local ok: boolean, response: any = pcall(function(): any
+    local function request(): any
         if not body then
             return httpService:RequestAsync({ Url = url, Method = method })
         end
@@ -59,18 +59,19 @@ local function send(port: number, method: Method, route: string, body: { [string
             Headers = { ["Content-Type"] = "application/json" },
             Body = httpService:JSONEncode(body),
         })
-    end)
-
-    if not ok then
-        return false, ""
     end
 
-    return response.Success, response.Body
+    local ok: boolean, response: any = pcall(request)
+    if not ok or not response.Success then
+        return nil
+    end
+
+    return response.Body
 end
 
 local function post(offer: Offer, route: string, message: { [string]: any }): boolean
     message.runId = offer.runId
-    return (send(offer.port, "POST", route, message))
+    return send(offer.port, "POST", route, message) ~= nil
 end
 
 local bridge = {}
@@ -79,8 +80,8 @@ bridge.CLI_PORTS = CLI_PORTS
 bridge.CLI_PROTOCOL = CLI_PROTOCOL
 
 function bridge.offer(port: number): Offer?
-    local ok: boolean, body: string = send(port, "GET", "/offer")
-    if not ok then
+    local body: string? = send(port, "GET", "/offer")
+    if not body then
         return nil
     end
 
@@ -98,8 +99,8 @@ function bridge.claim(offer: Offer): boolean
 end
 
 function bridge.collect(offer: ShowOffer): Collected?
-    local ok: boolean, body: string = send(offer.port, "POST", "/collect", { runId = offer.runId, place = game.Name })
-    if not ok then
+    local body: string? = send(offer.port, "POST", "/collect", { runId = offer.runId, place = game.Name })
+    if not body then
         return nil
     end
 
