@@ -15,9 +15,15 @@ export type Progress = runner.Progress
 export type Piece = report.Piece
 export type Row = report.Row
 export type Cell = report.Cell
+export type Styled = report.Styled
 export type Meter = report.Meter
 export type Part = report.Part
+export type Stat = report.Stat
+export type Key = report.Key
 export type Tone = report.Tone
+export type Align = report.Align
+export type CellOptions = report.CellOptions
+export type RowOptions = report.RowOptions
 
 local litmus = {
     test = collector.test,
