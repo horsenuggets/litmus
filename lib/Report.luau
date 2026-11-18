@@ -58,8 +58,20 @@ local ALIGNS: { [string]: true } = { left = true, right = true }
 
 local MAX_PARTS: number = 10
 
-local function refuse(piece: string, problem: string): never
-    error(`[Litmus]: report.{piece} {problem}`, 3)
+local function refuse(piece: string, problem: string, level: number?): never
+    error(`[Litmus]: report.{piece} {problem}`, level or 3)
+end
+
+local function checkText(piece: string, text: unknown): ()
+    if type(text) ~= "string" then
+        refuse(piece, `takes its text as a string, and got a {type(text)}`, 4)
+    end
+end
+
+local function checkTone(piece: string, tone: unknown): ()
+    if not TONES[tone :: any] then
+        refuse(piece, `takes a tone of good, plain or dim, and got {tostring(tone)}`, 4)
+    end
 end
 
 local function isList(value: unknown): boolean
@@ -78,17 +90,13 @@ end
 local report = {}
 
 function report.heading(text: string): Piece
-    if type(text) ~= "string" then
-        refuse("heading", `takes its text as a string, and got a {type(text)}`)
-    end
+    checkText("heading", text)
 
     return { kind = "heading", text = text }
 end
 
 function report.text(text: string): Piece
-    if type(text) ~= "string" then
-        refuse("text", `takes its text as a string, and got a {type(text)}`)
-    end
+    checkText("text", text)
 
     return { kind = "text", text = text }
 end
@@ -132,9 +140,7 @@ function report.part(value: number, tone: Tone): Part
         refuse("part", `takes its value as a number of zero or more, and got {tostring(value)}`)
     end
 
-    if not TONES[tone] then
-        refuse("part", `takes a tone of good, plain or dim, and got {tostring(tone)}`)
-    end
+    checkTone("part", tone)
 
     return { value = value, tone = tone }
 end
@@ -154,9 +160,7 @@ function report.meter(parts: { Part }): Meter
 end
 
 function report.cell(text: string, options: CellOptions?): Styled
-    if type(text) ~= "string" then
-        refuse("cell", `takes its text as a string, and got a {type(text)}`)
-    end
+    checkText("cell", text)
 
     local align: Align = if options and options.align then options.align else "left"
     local tone: Tone = if options and options.tone then options.tone else "plain"
@@ -165,9 +169,7 @@ function report.cell(text: string, options: CellOptions?): Styled
         refuse("cell", `takes an align of left or right, and got {tostring(align)}`)
     end
 
-    if not TONES[tone] then
-        refuse("cell", `takes a tone of good, plain or dim, and got {tostring(tone)}`)
-    end
+    checkTone("cell", tone)
 
     return { kind = "cell", text = text, align = align, tone = tone }
 end
