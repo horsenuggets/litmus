@@ -1,6 +1,5 @@
 use anstyle::{AnsiColor, Color, RgbColor, Style};
 
-/// The sixteen named colours have no orange, so this one is given as an exact colour: #FFB042
 pub const ORANGE_COLOR: Color = Color::Rgb(RgbColor(255, 176, 66));
 
 pub const GREEN: Style = AnsiColor::Green.on_default();

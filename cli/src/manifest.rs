@@ -7,7 +7,6 @@ use std::process::Command;
 
 const SPEC_SUFFIX: &str = ".spec";
 
-/// The names leading from `game` to an instance; names can hold dots, so they are never joined on the wire
 pub type InstancePath = Vec<String>;
 
 #[derive(Deserialize)]
@@ -26,12 +25,10 @@ pub struct Script {
     pub path: InstancePath,
     pub hash: String,
 
-    /// Where the script is on disk, relative to the project; kept here and not sent to the plugin
     #[serde(skip)]
     pub file: PathBuf,
 }
 
-/// Every script the project puts in the place, with what its source must hash to
 #[derive(Debug)]
 pub struct Manifest {
     pub project: String,
@@ -142,7 +139,6 @@ fn is_luau(file: &Path) -> bool {
         .is_some_and(|extension| extension == "luau" || extension == "lua")
 }
 
-/// Carriage returns are left out, so a checkout with CRLF endings hashes the same as the place's copy
 fn hash(source: &[u8]) -> String {
     let normalized: Vec<u8> = source.iter().copied().filter(|byte| *byte != b'\r').collect();
 

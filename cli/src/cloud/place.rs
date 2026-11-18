@@ -8,7 +8,6 @@ use std::process::{self, Command};
 const SCRIPT_SERVICE: &str = "ServerScriptService";
 const LOADSTRING_SWITCH: &str = "LoadStringEnabled";
 
-/// The project as a place file whose scripts may use `loadstring`
 pub fn build(project_dir: &Path, rojo_project: Option<&Path>) -> Result<Vec<u8>, String> {
     let file = env::temp_dir().join(format!("litmus-{}.rbxl", process::id()));
 
@@ -32,7 +31,6 @@ pub fn build(project_dir: &Path, rojo_project: Option<&Path>) -> Result<Vec<u8>,
     allow_loadstring(&built?)
 }
 
-/// A place built some other way, likewise as a file whose scripts may use `loadstring`
 pub fn read(file: &Path) -> Result<Vec<u8>, String> {
     let binary = file
         .extension()
@@ -47,7 +45,6 @@ pub fn read(file: &Path) -> Result<Vec<u8>, String> {
     allow_loadstring(&place)
 }
 
-/// The lib loads every module with `loadstring`, which a server refuses unless its place switches it on
 fn allow_loadstring(place: &[u8]) -> Result<Vec<u8>, String> {
     let mut dom = rbx_binary::from_reader(place).map_err(|error| format!("couldn't read the place file: {error}"))?;
 

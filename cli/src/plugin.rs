@@ -6,10 +6,8 @@ use crate::manifest::Manifest;
 use crate::server::{Mismatch, Outcome, Server, Timeouts};
 use serde_json::Value;
 
-/// How many of a stale place's files get named before the rest are only counted
 const MAX_FILES_LISTED: usize = 10;
 
-/// The results as the lib wrote them, from whichever open place holds the project
 pub fn run(manifest: &Manifest) -> Result<Value, String> {
     let server = Server::open()?;
     eprintln!("litmus: waiting for Studio on port {}", server.port());
@@ -26,7 +24,6 @@ pub fn run(manifest: &Manifest) -> Result<Value, String> {
     }
 }
 
-/// Why no place took the run: either none holds the project, or the ones that do are behind the disk
 fn unclaimed(mismatches: &[Mismatch]) -> String {
     if mismatches.is_empty() {
         return "no open place holds this project; open it in Studio and switch the Litmus plugin on".to_owned();

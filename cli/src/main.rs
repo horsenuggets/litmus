@@ -90,7 +90,6 @@ struct TestCommand {
 }
 
 impl TestCommand {
-    /// None when the options don't add up to one place to run in
     fn parse(options: &[&str]) -> Option<TestCommand> {
         let mut backend = None;
         let mut flags = Vec::new();
@@ -137,7 +136,6 @@ enum Command {
 }
 
 impl Command {
-    /// None when the arguments ask for nothing litmus knows
     fn parse(arguments: &[impl AsRef<str>]) -> Option<Command> {
         let words: Vec<&str> = arguments.iter().map(AsRef::as_ref).collect();
 
@@ -151,7 +149,6 @@ impl Command {
         }
     }
 
-    /// False only when tests ran and didn't all pass
     fn run(self) -> Result<bool, String> {
         match self {
             Command::Test(command) => run_tests(&command),
@@ -177,7 +174,6 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
 
-    // Failing tests exit with 1 and a command that couldn't be carried out with 2, so a script can tell the two apart
     match command.run() {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::from(1),
@@ -188,7 +184,6 @@ fn main() -> ExitCode {
     }
 }
 
-/// Whether every spec loaded, every test passed and the adapter failed nothing
 fn run_tests(command: &TestCommand) -> Result<bool, String> {
     let project_dir = Path::new(".");
 
@@ -211,7 +206,6 @@ fn run_tests(command: &TestCommand) -> Result<bool, String> {
     let run = Run::deserialize(&ran.results)
         .map_err(|error| format!("couldn't read the results, so the project's lib may not match this CLI: {error}"))?;
 
-    // Asked of stdout alone, so output sent to a file or another program is never wrapped
     let columns = terminal_size_of(io::stdout()).map(|(Width(columns), _)| usize::from(columns));
 
     anstream::print!("{}", render::run(&run, &ran.sources, columns));

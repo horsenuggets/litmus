@@ -9,7 +9,6 @@ use ureq::{Agent, Body};
 const ORIGIN: &str = "https://apis.roblox.com";
 const KEY_HEADER: &str = "x-api-key";
 
-/// For one request, the largest of which uploads the whole place
 const TIMEOUT: Duration = Duration::from_secs(300);
 
 const PERMISSIONS_HINT: &str =
@@ -19,7 +18,6 @@ const PERMISSIONS_HINT: &str =
 pub enum TaskState {
     Running,
 
-    /// With what the task's script returned
     Complete(Vec<Value>),
     Failed(String),
 }
@@ -71,7 +69,6 @@ impl Task {
     }
 }
 
-/// Roblox's Open Cloud, as far as a test run needs it
 pub struct Client {
     agent: Agent,
     key: String,
@@ -85,7 +82,6 @@ impl Client {
 
     fn at(origin: &str, key: String) -> Client {
         let agent = Agent::config_builder()
-            // Left to `read`, since the reason a request was refused is in its body
             .http_status_as_error(false)
             .timeout_global(Some(TIMEOUT))
             .build()
@@ -98,7 +94,6 @@ impl Client {
         }
     }
 
-    /// Saves `file` as the place's newest version, without publishing it, and returns that version's number
     pub fn upload(&self, target: &Target, file: &[u8]) -> Result<u64, String> {
         let url = format!(
             "{}/universes/v1/{}/places/{}/versions?versionType=Saved",
@@ -116,7 +111,6 @@ impl Client {
         Ok(uploaded.version_number)
     }
 
-    /// Starts `script` in a server of its own holding that version of the place, and returns the task to ask after
     pub fn start(&self, target: &Target, version: u64, script: &str) -> Result<String, String> {
         let url = format!(
             "{}/cloud/v2/universes/{}/places/{}/versions/{version}/luau-execution-session-tasks",
@@ -143,7 +137,6 @@ impl Client {
     }
 }
 
-/// What Open Cloud answered, or why the request to `action` came to nothing
 fn read<T: DeserializeOwned>(action: &str, response: Result<Response<Body>, ureq::Error>) -> Result<T, String> {
     let mut response = response.map_err(|error| format!("couldn't {action}: {error}"))?;
     let status = response.status();
@@ -193,7 +186,6 @@ mod tests {
         }
     }
 
-    /// Plays Open Cloud's part: answers one request with `status` and `body`, and hands back what was asked
     fn fake(status: u16, body: &'static str) -> (Client, thread::JoinHandle<Asked>) {
         let server = Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();

@@ -5,10 +5,8 @@ use serde_json::Value;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiny_http::{Method, Request, Response};
 
-/// The plugin polls exactly these, so the two lists have to stay the same
 const PORTS: [u16; 2] = [37100, 37101];
 
-/// Raised whenever the plugin and the CLI would stop understanding each other
 const PROTOCOL: u32 = 3;
 
 pub struct Timeouts {
@@ -36,7 +34,6 @@ struct RunOffer<'a> {
     specs: Vec<&'a InstancePath>,
 }
 
-/// Wraps every message from the plugin, so that one answering an earlier run on this port can be told apart
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Envelope<T> {
@@ -50,7 +47,6 @@ struct Claim {
     place: String,
 }
 
-/// A place that holds the project, but not the code that is on disk
 #[derive(Deserialize, Debug, PartialEq)]
 pub struct Mismatch {
     pub place: String,
@@ -72,7 +68,6 @@ pub enum Outcome {
     Abandoned { place: String },
 }
 
-/// One run's conversation with the plugins, apart from the sockets that carry it
 struct Exchange {
     run_id: String,
     offer: String,
@@ -146,7 +141,6 @@ impl Exchange {
         }
     }
 
-    /// What the run came to when nobody finished it in time
     fn expire(self) -> Outcome {
         match self.claimant {
             Some(place) => Outcome::Abandoned { place },
@@ -212,7 +206,6 @@ impl<'a> Showing<'a> {
     }
 }
 
-/// The message in `body`, or the status to refuse it with
 fn read<T: DeserializeOwned>(run_id: &str, body: &str) -> Result<T, u16> {
     let envelope: Envelope<T> = serde_json::from_str(body).map_err(|_| 400u16)?;
     if envelope.run_id != run_id {
@@ -241,7 +234,6 @@ impl Server {
     fn bind(port: u16) -> Option<Server> {
         let http = tiny_http::Server::http(("127.0.0.1", port)).ok()?;
 
-        // Read back, since the tests bind port 0 to be given any free one
         let port = http.server_addr().to_ip()?.port();
 
         Some(Server { http, port })
@@ -251,7 +243,6 @@ impl Server {
         self.port
     }
 
-    /// Offers one run of the project to whichever place holds it, and waits for how that goes
     pub fn offer_run(
         &self,
         manifest: &Manifest,
@@ -318,7 +309,6 @@ impl Server {
         }
     }
 
-    /// The plugin's next request and its body, or nothing when none came in time or it was turned away
     fn receive(&self, patience: Duration) -> Result<Option<(Request, String)>, String> {
         let received = self
             .http
@@ -351,7 +341,6 @@ fn new_run_id() -> String {
     format!("{nanos:x}-{:x}", std::process::id())
 }
 
-/// A web page can only reach this port under a domain name of its own, and that name is what it sends as the host
 fn is_local(request: &Request, port: u16) -> bool {
     request.headers().iter().any(|header| {
         let host = header.value.as_str();
@@ -364,7 +353,6 @@ fn respond(request: Request, status: u16) {
 }
 
 fn respond_with(request: Request, status: u16, body: &str) {
-    // A plugin that hangs up early will simply ask again on its next poll
     let _ = request.respond(Response::from_string(body).with_status_code(status));
 }
 
@@ -391,7 +379,6 @@ mod tests {
         Exchange::new(&manifest()).unwrap()
     }
 
-    /// Posts `message` as the plugin would for this exchange's run, and returns the status it would get
     fn post(exchange: &mut Exchange, route: &str, mut message: Value) -> u16 {
         message["runId"] = json!(exchange.run_id);
         status_of(exchange.answer(&Method::Post, route, &message.to_string()))
@@ -557,7 +544,6 @@ mod tests {
         assert!(matches!(showing.answer(&Method::Post, "/claim", &stranger), ShowAnswer::Status(404)));
     }
 
-    /// Plays the plugin's part over a real connection: one request, returning the status and the body
     fn send(host: &str, port: u16, method: &str, route: &str, body: &str) -> (u16, String) {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         write!(
@@ -576,7 +562,6 @@ mod tests {
         (status, body.to_owned())
     }
 
-    /// Serves one run on a thread, returning its port, its outcome, and the places `on_claim` was told of
     fn serve(timeouts: Timeouts) -> (u16, thread::JoinHandle<(Outcome, Vec<String>)>) {
         let server = Server::bind(0).unwrap();
         let port = server.port();

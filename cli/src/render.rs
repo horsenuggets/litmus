@@ -10,17 +10,14 @@ const PASS_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::Green))
 const FAIL_BADGE: Style = badge(AnsiColor::BrightWhite, Color::Ansi(AnsiColor::Red));
 const ERROR_BADGE: Style = badge(AnsiColor::Black, ORANGE_COLOR);
 
-/// The longest label a badge holds, so that spec names start in one column whatever the badge says
 const LABEL_WIDTH: usize = "ERROR".len();
 
 const DETAIL_INDENT: &str = "     ";
 
 const REASON_INDENT: &str = "                ";
 
-/// The narrowest column worth wrapping a message into; with less room, the terminal is left to wrap it
 const MIN_MESSAGE_WIDTH: usize = 30;
 
-/// The lib tags its own errors with this, which says nothing once the CLI is the one printing them
 const LIB_TAG: &str = "[Litmus]: ";
 
 pub enum Sources {
@@ -56,7 +53,6 @@ impl Sources {
     }
 }
 
-/// `columns` is how wide the terminal is, or nothing when the text isn't going to one
 pub fn run(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
     let results = &run.specs;
 
@@ -73,7 +69,6 @@ pub fn run(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
         let block = spec_lines(spec, sources, name_width, columns);
         let has_details = block.len() > 1;
 
-        // Passing specs sit together as a list, while a spec with details stands apart on both sides
         if index > 0 && (has_details || after_details) {
             lines.push(String::new());
         }
@@ -98,7 +93,6 @@ pub fn run(run: &Run, sources: &Sources, columns: Option<usize>) -> String {
     lines.join("\n")
 }
 
-/// A passing spec takes one line; any other is followed by what went wrong
 fn spec_lines(spec: &SpecResult, sources: &Sources, name_width: usize, columns: Option<usize>) -> Vec<String> {
     let name = sources.file(&spec.path);
 
@@ -166,7 +160,6 @@ fn run_failure(reason: &str) -> Vec<String> {
     lines
 }
 
-/// `path:line: message`, the form a terminal turns into a link, with the message's further lines kept under its first
 fn describe(failure: &Failure, sources: &Sources, columns: Option<usize>) -> Vec<String> {
     let location = format!("{}:{}:", sources.file(&failure.source), failure.line);
     let margin = " ".repeat(DETAIL_INDENT.len() + location.chars().count() + 1);
@@ -184,7 +177,6 @@ fn describe(failure: &Failure, sources: &Sources, columns: Option<usize>) -> Vec
     lines
 }
 
-/// Breaks each line longer than `width` between words; a word longer than that is left to overflow
 fn wrap(text: &str, width: Option<usize>) -> Vec<String> {
     let Some(width) = width else {
         return text.lines().map(str::to_owned).collect();
@@ -196,7 +188,6 @@ fn wrap(text: &str, width: Option<usize>) -> Vec<String> {
         let mut current = String::new();
         let mut length = 0;
 
-        // Splitting on single spaces keeps runs of them, so indentation inside a message survives
         for (index, word) in line.split(' ').enumerate() {
             let word_length = word.chars().count();
 
@@ -219,7 +210,6 @@ fn wrap(text: &str, width: Option<usize>) -> Vec<String> {
     lines
 }
 
-/// Luau starts a thrown message with where it was thrown, which the location beside it already says
 fn tidy<'a>(failure: &'a Failure, sources: &Sources) -> &'a str {
     let position = format!("{}:{}: ", sources.chunk(&failure.source), failure.line);
     let message = failure.message.strip_prefix(&position).unwrap_or(&failure.message);
@@ -227,7 +217,6 @@ fn tidy<'a>(failure: &'a Failure, sources: &Sources) -> &'a str {
     message.strip_prefix(LIB_TAG).unwrap_or(message)
 }
 
-/// Leaves out whatever there is none of, but always says something
 pub fn counts(parts: &[(usize, &str, Style)]) -> String {
     let shown: Vec<String> = parts
         .iter()

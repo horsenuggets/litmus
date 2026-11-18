@@ -22,7 +22,6 @@ pub struct SpecResult {
     pub path: InstancePath,
     pub tests: Vec<TestResult>,
 
-    /// Set when the spec itself didn't load, in which case none of its tests ran
     pub failure: Option<Failure>,
 }
 

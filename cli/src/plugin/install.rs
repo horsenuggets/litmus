@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 const PLUGIN: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/plugin.rbxm"));
 
-/// Named apart from a copy built by hand, so uninstalling only ever removes what this CLI wrote
 const FILE_NAME: &str = "LitmusManagedPlugin.rbxm";
 
 pub fn install() -> Result<(), String> {
@@ -27,9 +26,7 @@ pub fn uninstall() -> Result<(), String> {
     Ok(())
 }
 
-/// Where the plugin was written, replacing any copy installed before
 fn install_into(folder: &Path) -> Result<PathBuf, String> {
-    // Studio only makes the folder once its Plugins Folder button is first pressed
     fs::create_dir_all(folder).map_err(|error| format!("couldn't create {}: {error}", folder.display()))?;
 
     let file = folder.join(FILE_NAME);
@@ -38,7 +35,6 @@ fn install_into(folder: &Path) -> Result<PathBuf, String> {
     Ok(file)
 }
 
-/// Whether there was a plugin to remove
 fn uninstall_from(folder: &Path) -> Result<bool, String> {
     let file = folder.join(FILE_NAME);
 
