@@ -13,7 +13,6 @@ export type Props = {
     color: flux.UsedAs<Color3>,
 }
 
-local STROKE: number = 1
 local PADDING: Vector2 = Vector2.new(12, 10)
 local SECTION_GAP: number = 10
 
@@ -101,10 +100,10 @@ local function failureBox(scope: flux.Scope, props: Props): Frame
         Size = UDim2.fromScale(1, 0),
 
         scope:element "UIPadding" {
-            PaddingLeft = UDim.new(0, STROKE),
-            PaddingRight = UDim.new(0, STROKE),
-            PaddingTop = UDim.new(0, STROKE),
-            PaddingBottom = UDim.new(0, STROKE),
+            PaddingLeft = UDim.new(0, theme.stroke),
+            PaddingRight = UDim.new(0, theme.stroke),
+            PaddingTop = UDim.new(0, theme.stroke),
+            PaddingBottom = UDim.new(0, theme.stroke),
         },
 
         scope:element "Frame" {
@@ -120,7 +119,7 @@ local function failureBox(scope: flux.Scope, props: Props): Frame
             BackgroundTransparency = 0,
 
             scope:element "UICorner" { CornerRadius = theme.cornerRadius },
-            scope:element "UIStroke" { Color = colors.border, Thickness = STROKE },
+            scope:element "UIStroke" { Color = colors.border, Thickness = theme.stroke },
 
             scope:element "UIPadding" {
                 PaddingLeft = UDim.new(0, PADDING.X),

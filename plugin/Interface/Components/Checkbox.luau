@@ -13,10 +13,6 @@ export type Props = {
 
 local SIZE: number = 28
 local ICON_SIZE: number = 20
-local STROKE: number = 1
-
-local FADE_SPEED: number = 38
-local FADE_DAMPING: number = 1.1
 
 local RIPPLE_ALPHA: number = 0.2
 
@@ -27,7 +23,7 @@ local function checkbox(scope: flux.Scope, props: Props): TextButton
         return if use(props.checked) then 0 else 1
     end)
 
-    local transparency: flux.Spring<number> = scope:spring(transparencyTarget, FADE_SPEED, FADE_DAMPING)
+    local transparency: flux.Spring<number> = scope:spring(transparencyTarget, theme.toggleSpeed, theme.toggleDamping)
 
     local pressing: flux.Value<boolean> = scope:value(false)
 
@@ -72,10 +68,10 @@ local function checkbox(scope: flux.Scope, props: Props): TextButton
             Name = "Outline",
             ZIndex = 1,
 
-            Size = UDim2.new(1, -STROKE * 2, 1, -STROKE * 2),
+            Size = UDim2.new(1, -theme.stroke * 2, 1, -theme.stroke * 2),
 
             scope:element "UICorner" { CornerRadius = theme.cornerRadius },
-            scope:element "UIStroke" { Color = colors.border, Thickness = STROKE },
+            scope:element "UIStroke" { Color = colors.border, Thickness = theme.stroke },
         },
 
         scope:hydrate(cross) { ZIndex = 2 },

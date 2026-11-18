@@ -1,8 +1,6 @@
 local flux = require("../Packages/Flux")
 local theme = require("./Theme")
 
-local WHITE: Color3 = Color3.fromRGB(255, 255, 255)
-
 local DARK_THEME_LIGHTENING: number = 0.35
 local LIGHT_THEME_TOP_BRIGHTNESS: number = 1.4
 local LIGHT_THEME_BOTTOM_BRIGHTNESS: number = 0.75
@@ -34,7 +32,7 @@ local function studioColors(scope: flux.Scope, studioTheme: flux.UsedAs<StudioTh
             local middle: Color3 = use(base)
 
             if use(isDark) then
-                return ColorSequence.new(middle:Lerp(WHITE, DARK_THEME_LIGHTENING), middle)
+                return ColorSequence.new(middle:Lerp(theme.white, DARK_THEME_LIGHTENING), middle)
             end
 
             return ColorSequence.new(

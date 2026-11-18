@@ -20,12 +20,7 @@ export type Props = {
 
 local HOVER_ALPHA: number = 0.05
 
-local OPEN_SPEED: number = 38
-local OPEN_DAMPING: number = 1.1
-
 local SHUT_ROTATION: number = -90
-
-local CONTENT_INDENT: number = theme.iconSize + theme.rowGap
 
 local CONTENT_TOP: number = 4
 local CONTENT_BOTTOM: number = 6
@@ -44,7 +39,7 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
         return if use(open) then 1 else 0
     end)
 
-    local openness: flux.Spring<number> = scope:spring(opennessTarget, OPEN_SPEED, OPEN_DAMPING)
+    local openness: flux.Spring<number> = scope:spring(opennessTarget, theme.toggleSpeed, theme.toggleDamping)
 
     local contentHeight: flux.Value<number> = scope:value(0)
 
@@ -171,7 +166,7 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
                     measure,
 
                     inner:element "UIPadding" {
-                        PaddingLeft = UDim.new(0, props.indent or CONTENT_INDENT),
+                        PaddingLeft = UDim.new(0, props.indent or theme.rowIndent),
                         PaddingTop = UDim.new(0, CONTENT_TOP),
                         PaddingBottom = UDim.new(0, CONTENT_BOTTOM),
                     },

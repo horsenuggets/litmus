@@ -27,9 +27,14 @@ export type Colors = {
 local WHITE: Color3 = Color3.fromRGB(255, 255, 255)
 local FONTS: string = "rbxasset://fonts/families"
 
+local ICON_SIZE: number = 16
+local ROW_GAP: number = 6
+
 local context: flux.Context<Colors?> = flux.context(nil :: Colors?)
 
 local theme = {
+    white = WHITE,
+
     brandGradient = ColorSequence.new(Color3.fromHex("#8448DC"), Color3.fromHex("#6230C8")),
     onBrand = WHITE,
     onBrandGradient = ColorSequence.new(WHITE, Color3.fromHex("#E6D6FF")),
@@ -45,14 +50,19 @@ local theme = {
     titleTextSize = 20,
 
     cornerRadius = UDim.new(0, 5),
+    stroke = 1,
 
     rowPadding = 8,
-    rowGap = 6,
-    iconSize = 16,
+    rowGap = ROW_GAP,
+    iconSize = ICON_SIZE,
+    rowIndent = ICON_SIZE + ROW_GAP,
     listGap = 2,
 
     hoverAlpha = 0.1,
     hoverSpeed = 31,
+
+    toggleSpeed = 38,
+    toggleDamping = 1.1,
 
     tintTransparency = 0.85,
 }

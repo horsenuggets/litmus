@@ -18,7 +18,6 @@ export type Props = {
 
 local HEIGHT: number = 34
 local SIDE_PADDING: number = 15
-local STROKE: number = 1
 
 local FILL_ALPHA: { [Style]: number } = {
     solid = 0.2,
@@ -84,10 +83,10 @@ local function textButton(scope: flux.Scope, props: Props): TextButton
                 Name = "Outline",
                 ZIndex = 1,
 
-                Size = UDim2.new(1, -STROKE * 2, 1, -STROKE * 2),
+                Size = UDim2.new(1, -theme.stroke * 2, 1, -theme.stroke * 2),
 
                 scope:element "UICorner" { CornerRadius = theme.cornerRadius },
-                scope:element "UIStroke" { Color = colors.border, Thickness = STROKE },
+                scope:element "UIStroke" { Color = colors.border, Thickness = theme.stroke },
             },
 
         scope:hydrate(hover) { ZIndex = 2 },

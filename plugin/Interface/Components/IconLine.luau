@@ -18,7 +18,6 @@ export type Props = {
 local PADDING: number = 4
 local GAP: number = 6
 
-local TEXT_INDENT: number = theme.iconSize + theme.rowGap
 
 local function iconLine(scope: flux.Scope, props: Props): Frame
     local glyph: Frame = icon(scope, { name = props.icon, gradient = props.gradient })
@@ -46,10 +45,10 @@ local function iconLine(scope: flux.Scope, props: Props): Frame
             Name = "Body",
 
             AnchorPoint = Vector2.zero,
-            Position = UDim2.fromOffset(TEXT_INDENT, 0),
+            Position = UDim2.fromOffset(theme.rowIndent, 0),
 
             AutomaticSize = Enum.AutomaticSize.Y,
-            Size = UDim2.new(1, -TEXT_INDENT, 0, 0),
+            Size = UDim2.new(1, -theme.rowIndent, 0, 0),
 
             scope:element "UIListLayout" {
                 Padding = UDim.new(0, GAP),

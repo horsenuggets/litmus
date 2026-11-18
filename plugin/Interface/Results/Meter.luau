@@ -21,7 +21,6 @@ local STEP_WIDTH: number = 4
 local HEIGHT: number = 8
 
 local EDGE: number = 0.001
-local WHITE: Color3 = Color3.new(1, 1, 1)
 
 local function meter(scope: flux.Scope, props: Props): Frame
     local colors: theme.Colors = theme.colors(scope)
@@ -52,7 +51,7 @@ local function meter(scope: flux.Scope, props: Props): Frame
 
         Size = UDim2.fromOffset(STEPS * STEP_WIDTH, HEIGHT),
 
-        BackgroundColor3 = WHITE,
+        BackgroundColor3 = theme.white,
         BackgroundTransparency = if #stretches > 0 then 0 else 1,
 
         scope:element "UICorner" { CornerRadius = UDim.new(1, 0) },
@@ -73,7 +72,7 @@ local function meter(scope: flux.Scope, props: Props): Frame
                 end
 
                 if #points == 0 then
-                    return ColorSequence.new(WHITE)
+                    return ColorSequence.new(theme.white)
                 end
 
                 return ColorSequence.new(points)
