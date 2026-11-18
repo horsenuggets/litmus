@@ -29,7 +29,8 @@ local CONNECTED_SETTING: string = "Connected"
 
 local NOTHING_RAN: outcome.Run = { kind = "results", specs = {} }
 
-if not runService:IsEdit() then
+local isTheCopyEditingThePlace: boolean = runService:IsEdit()
+if not isTheCopyEditingThePlace then
     return
 end
 
