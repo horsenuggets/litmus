@@ -1,16 +1,8 @@
---[[
-    Terminal plumbing for the commands: argument parsing, logging, errors and
-    child processes. Library functions throw already-formatted
-    `[prefix]: message` errors; `Cli.main` runs a command, prints any error
-    and exits with code 1.
-]]
-
 local process = require "@lune/process"
 local stdio = require "@lune/stdio"
 
 local cli = {}
 
--- Types
 export type ParsedArgs = {
     positionals: { string },
     flags: { [string]: string | boolean },
@@ -24,11 +16,10 @@ export type RunResult = {
 }
 
 export type RunOptions = {
-    check: boolean?, -- throw on a non-zero exit code (default true)
-    forward: boolean?, -- forward stdio to the terminal instead of capturing it
+    check: boolean?,
+    forward: boolean?,
 }
 
--- Logging
 function cli.log(prefix: string, message: string): ()
     print(`[{prefix}]: {message}`)
 end
@@ -45,8 +36,6 @@ function cli.fail(prefix: string, message: string): never
     error(`[{prefix}]: {message}`, 0)
 end
 
--- Argument parsing: `--name=value` and `--flag` become flags, everything else
--- is positional
 function cli.parseArgs(args: { string }): ParsedArgs
     local positionals: { string } = {}
     local flags: { [string]: string | boolean } = {}
@@ -70,7 +59,6 @@ function cli.parseArgs(args: { string }): ParsedArgs
     return { positionals = positionals, flags = flags }
 end
 
--- Process execution with friendly failures
 function cli.run(command: string, args: { string }, options: RunOptions?): RunResult
     local runOptions: RunOptions = options or {}
 
@@ -94,7 +82,6 @@ function cli.run(command: string, args: { string }, options: RunOptions?): RunRe
     return execResult
 end
 
--- Opens a file with the system's default handler, normally Roblox Studio
 function cli.open(path: string): ()
     if process.os == "windows" then
         cli.run("explorer", { path }, { check = false })
@@ -105,8 +92,6 @@ function cli.open(path: string): ()
     end
 end
 
--- Runs `command` with the parsed process arguments; any error it throws is
--- printed in red and exits the process with code 1
 function cli.main(command: (args: ParsedArgs) -> ()): ()
     local parsed: ParsedArgs = cli.parseArgs(process.args)
     local ok, result = pcall(function(): string?

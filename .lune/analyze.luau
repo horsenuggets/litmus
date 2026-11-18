@@ -1,14 +1,3 @@
---[[
-    Type-checks `lib`, `tests` and `plugin` the way the editor does, listing
-    each problem once as a clickable `path:line:column`, and exiting 1 if there
-    are any.
-    Usage: lune run analyze [--full]
-    `--full` shows long types and every reason in full.
-    Roblox's definitions and private sourcemaps live in `luau-cache`, so the
-    editor's `sourcemap.json` is left alone. Delete that folder to fetch newer
-    definitions.
-]]
-
 local fs = require "@lune/fs"
 local net = require "@lune/net"
 local process = require "@lune/process"
@@ -21,9 +10,7 @@ local CACHE_DIR: string = "luau-cache"
 local DEFS_FILE: string = `{CACHE_DIR}/globalTypes.d.luau`
 local DEFS_URL: string = "https://raw.githubusercontent.com/JohnnyMorganz/luau-lsp/main/scripts/globalTypes.d.luau"
 
--- One run of the analyzer; each Rojo project needs its own, since requires resolve through its sourcemap
 type Pass = {
-    -- Left out for the default project
     project: string?,
     sourcemap: string,
     paths: { string },
@@ -35,7 +22,6 @@ local PASSES: { Pass } = {
         sourcemap = `{CACHE_DIR}/sourcemap.json`,
         paths = { "lib", "tests" },
 
-        -- Holds fixtures that are broken on purpose, to prove the loader reports them
         ignored = { "tests/Anchor/Loader/**" },
     },
     {
@@ -46,14 +32,11 @@ local PASSES: { Pass } = {
     },
 }
 
--- The analyzer asks for an editor feature it has no editor to give it; no setting turns this off
 local NO_CLIENT_WARNING: string = "[WARN] client does not allow didChangeWatchedFiles registration"
 
--- What's shown of a problem without `--full`
 local MAX_LINE_LENGTH: number = 200
 local MAX_REASONS: number = 5
 
--- Lines up details under a problem's message, past its "warning" label
 local LABEL_WIDTH: number = 7
 local MESSAGE_INDENT: string = string.rep(" ", 2 + LABEL_WIDTH + 2)
 
@@ -62,13 +45,10 @@ type Problem = {
     line: number,
     column: number,
 
-    -- `TypeError`, `SyntaxError`, or a lint's name
     kind: string,
     message: string,
     details: { string },
 }
-
--- Cache
 
 local function ensureCacheDir(): ()
     if not fs.isDir(CACHE_DIR) then
@@ -91,8 +71,6 @@ local function ensureDefs(): ()
     fs.writeFile(DEFS_FILE, response.body)
 end
 
--- Running the analyzer
-
 local function analyzerArgs(pass: Pass): { string }
     local args: { string } = {
         "analyze",
@@ -112,18 +90,14 @@ local function analyzerArgs(pass: Pass): { string }
     return args
 end
 
--- Parsing its output
-
 local function isLog(line: string): boolean
     return string.sub(line, 1, 7) == "[INFO] " or string.sub(line, 1, #NO_CLIENT_WARNING) == NO_CLIENT_WARNING
 end
 
--- A notice from the tool itself, as opposed to more of a problem's message
 local function isNotice(line: string): boolean
     return string.sub(line, 1, 1) == "["
 end
 
--- Absolute paths and backslashes become a path from the repo's root
 local function projectPath(path: string): string
     local normalized: string = string.gsub(path, "\\", "/")
     local root: string = string.gsub(process.cwd, "\\", "/")
@@ -135,7 +109,6 @@ local function projectPath(path: string): string
     return normalized
 end
 
--- Reads `path [game/Module](line,column): Kind: message`; the bracket is left out for lints
 local function parseHeader(line: string): Problem?
     local location, row, column, kind, message = string.match(line, "^(.-)%((%d+),(%d+)%): (%a+): (.*)$")
     if not location then
@@ -155,7 +128,6 @@ local function parseHeader(line: string): Problem?
     }
 end
 
--- Returns the problems, and any lines that couldn't be read as part of one
 local function parseOutput(output: string): ({ Problem }, { string })
     local problems: { Problem } = {}
     local unparsed: { string } = {}
@@ -185,7 +157,6 @@ local function problemKey(problem: Problem): string
     return `{problem.path}:{problem.line}:{problem.column}:{problem.kind}:{problem.message}\n{details}`
 end
 
--- The analyzer repeats a problem once per module requiring its file
 local function distinct(problems: { Problem }): { Problem }
     local kept: { Problem } = {}
     local seen: { [string]: true } = {}
@@ -213,8 +184,6 @@ local function comesBefore(a: Problem, b: Problem): boolean
     return a.message < b.message
 end
 
--- Formatting it
-
 local function paint(color: stdio.Color, text: string): string
     return stdio.color(color) .. text .. stdio.color("reset")
 end
@@ -227,7 +196,6 @@ local function plural(count: number, noun: string): string
     return `{count} {noun}{if count == 1 then "" else "s"}`
 end
 
--- Drops the "; " some lines end with, and cuts long ones short
 local function tidy(text: string, full: boolean): string
     local trimmed: string = string.gsub(text, ";%s*$", "")
     if full or #trimmed <= MAX_LINE_LENGTH then
@@ -241,7 +209,6 @@ local function isReason(detail: string): boolean
     return string.sub(detail, 1, 4) == "\t * "
 end
 
--- Tabbed lines are types, starred lines reasons, and the rest join them up
 local function formatDetail(detail: string, full: boolean): string
     if isReason(detail) then
         return `  • {tidy(string.sub(detail, 5), full)}`
@@ -286,7 +253,6 @@ local function formatLabel(problem: Problem): string
     return paint(if isError(problem) then "red" else "yellow", name) .. padding
 end
 
--- Errors explain themselves; a lint's name is what you'd search for or silence
 local function formatMessage(problem: Problem, full: boolean): string
     local message: string = tidy(problem.message, full)
     return if isError(problem) then message else `{message} ({problem.kind})`
@@ -350,7 +316,6 @@ cli.main(function(args: cli.ParsedArgs): ()
     local problems: { Problem } = distinct(parsed)
     table.sort(problems, comesBefore)
 
-    -- Whatever couldn't be read still gets shown, rather than disappearing
     for _, line in unparsed do
         print(line)
     end
