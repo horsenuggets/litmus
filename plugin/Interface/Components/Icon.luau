@@ -8,12 +8,10 @@ export type Props = {
     name: Name,
 
     gradient: flux.UsedAs<ColorSequence>,
-
-    size: number?,
     transparency: flux.UsedAs<number>?,
 
+    size: number?,
     rotation: flux.UsedAs<number>?,
-
     layoutOrder: number?,
 }
 

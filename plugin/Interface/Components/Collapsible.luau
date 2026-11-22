@@ -32,7 +32,6 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
     local canOpen: boolean = content ~= nil
 
     local open: flux.Value<boolean> = scope:value(canOpen and props.startsOpen)
-
     local built: flux.Value<boolean> = scope:value(flux.peek(open))
 
     local opennessTarget: flux.Computed<number> = scope:computed(function(use: flux.Use): number
@@ -40,7 +39,6 @@ local function collapsible(scope: flux.Scope, props: Props): Frame
     end)
 
     local openness: flux.Spring<number> = scope:spring(opennessTarget, theme.toggleSpeed, theme.toggleDamping)
-
     local contentHeight: flux.Value<number> = scope:value(0)
 
     local function measure(measuring: flux.Scope, instance: Frame): ()
