@@ -222,13 +222,12 @@ pub struct Server {
 
 impl Server {
     pub fn open() -> Result<Server, String> {
-        PLUGIN_PORTS.into_iter().find_map(Server::bind).ok_or_else(|| {
-            format!(
-                "ports {} to {} are all in use",
-                PLUGIN_PORTS[0],
-                PLUGIN_PORTS[PLUGIN_PORTS.len() - 1]
-            )
-        })
+        let [first, second] = PLUGIN_PORTS;
+
+        PLUGIN_PORTS
+            .into_iter()
+            .find_map(Server::bind)
+            .ok_or_else(|| format!("ports {first} and {second} are both in use"))
     }
 
     fn bind(port: u16) -> Option<Server> {

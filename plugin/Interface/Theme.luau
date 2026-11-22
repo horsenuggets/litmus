@@ -74,7 +74,7 @@ end
 function theme.colors(scope: flux.Scope): Colors
     local colors: Colors? = context:consume(scope)
     if not colors then
-        error("[Theme]: no colours here; build this under theme.provide", 2)
+        error("[Litmus]: no colours here; build this under theme.provide", 2)
     end
 
     return colors

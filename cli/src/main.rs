@@ -37,8 +37,8 @@ Runs a project's tests, in Roblox Studio or wherever litmus.toml says
 Usage: litmus <command>
 
 Commands:
-  test [paths]        Run the project's .spec files in an open Studio place; with paths, only the ones at or
-                      under those files and folders
+  test [paths]        Run the project's .spec files, wherever the options for test say; with paths, only the
+                      ones at or under those files and folders
   plugin install      Install the Studio plugin, replacing any copy installed before
   plugin uninstall    Remove the Studio plugin
 
