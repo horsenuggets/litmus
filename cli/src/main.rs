@@ -142,12 +142,18 @@ impl Command {
     fn parse(arguments: &[impl AsRef<str>]) -> Option<Command> {
         let words: Vec<&str> = arguments.iter().map(AsRef::as_ref).collect();
 
+        if words.iter().any(|word| matches!(*word, "--help" | "-h")) {
+            return Some(Command::Help);
+        }
+
+        if words.iter().any(|word| matches!(*word, "--version" | "-V")) {
+            return Some(Command::Version);
+        }
+
         match words.as_slice() {
             ["test", options @ ..] => TestCommand::parse(options).map(Command::Test),
             ["plugin", "install"] => Some(Command::PluginInstall),
             ["plugin", "uninstall"] => Some(Command::PluginUninstall),
-            ["--help" | "-h"] => Some(Command::Help),
-            ["--version" | "-V"] => Some(Command::Version),
             _ => None,
         }
     }
@@ -288,6 +294,14 @@ mod tests {
         assert_eq!(Command::parse(&["-h"]), Some(Command::Help));
         assert_eq!(Command::parse(&["--version"]), Some(Command::Version));
         assert_eq!(Command::parse(&["-V"]), Some(Command::Version));
+    }
+
+    #[test]
+    fn reads_help_and_version_wherever_they_are() {
+        assert_eq!(Command::parse(&["test", "--help"]), Some(Command::Help));
+        assert_eq!(Command::parse(&["test", "--standalone", "--coverage", "-h"]), Some(Command::Help));
+        assert_eq!(Command::parse(&["plugin", "--version"]), Some(Command::Version));
+        assert_eq!(Command::parse(&["run", "-V"]), Some(Command::Version));
     }
 
     #[test]
