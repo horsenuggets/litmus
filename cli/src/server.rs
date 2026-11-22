@@ -421,12 +421,12 @@ mod tests {
         let mut exchange = exchange();
         post(&mut exchange, "/claim", json!({ "place": "First" }));
 
-        let report = json!({ "runId": exchange.run_id, "results": [{ "path": "Thing.spec" }] }).to_string();
+        let report = json!({ "runId": exchange.run_id, "results": { "specs": [{ "path": "Thing.spec" }] } }).to_string();
         let RunAnswer::Finished(outcome) = exchange.answer(&Method::Post, "/result", &report) else {
             panic!("expected the run to finish");
         };
 
-        assert_eq!(outcome, Outcome::Results(json!([{ "path": "Thing.spec" }])));
+        assert_eq!(outcome, Outcome::Results(json!({ "specs": [{ "path": "Thing.spec" }] })));
     }
 
     #[test]
@@ -452,7 +452,7 @@ mod tests {
     fn a_result_nobody_claimed_is_refused() {
         let mut exchange = exchange();
 
-        assert_eq!(post(&mut exchange, "/result", json!({ "results": [] })), 409);
+        assert_eq!(post(&mut exchange, "/result", json!({ "results": { "specs": [] } })), 409);
     }
 
     #[test]
@@ -587,12 +587,12 @@ mod tests {
         assert_eq!(status, 200);
 
         let claim = json!({ "runId": offer["runId"], "place": "First" }).to_string();
-        let report = json!({ "runId": offer["runId"], "results": [] }).to_string();
+        let report = json!({ "runId": offer["runId"], "results": { "specs": [] } }).to_string();
         assert_eq!(send(&host, port, "POST", "/claim", &claim).0, 200);
         assert_eq!(send(&host, port, "POST", "/result", &report).0, 200);
 
         let (outcome, claimed) = handle.join().unwrap();
-        assert_eq!(outcome, Outcome::Results(json!([])));
+        assert_eq!(outcome, Outcome::Results(json!({ "specs": [] })));
         assert_eq!(claimed, ["First"]);
     }
 
