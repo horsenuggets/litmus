@@ -93,15 +93,15 @@ struct TestCommand {
 }
 
 impl TestCommand {
-    fn parse(options: &[&str]) -> Option<TestCommand> {
-        let mut backend = None;
+    fn parse(options: &[&str]) -> Result<TestCommand, String> {
+        let mut backend: Option<&str> = None;
         let mut flags = Vec::new();
         let mut paths = Vec::new();
 
         for option in options {
             let Some(name) = option.strip_prefix("--") else {
                 if option.starts_with('-') {
-                    return None;
+                    return Err(format!("{option} isn't an option; litmus's options and a project's flags start with --"));
                 }
 
                 paths.push((*option).to_owned());
@@ -109,15 +109,17 @@ impl TestCommand {
             };
 
             match Backend::named(name) {
-                Some(named) if backend.is_none() => backend = Some(named),
-                Some(_) => return None,
-                None if name.is_empty() => return None,
+                Some(_) if let Some(first) = backend => {
+                    return Err(format!("--{first} and --{name} each pick a backend, and a run takes one"));
+                }
+                Some(_) => backend = Some(name),
+                None if name.is_empty() => return Err("-- names no flag".to_owned()),
                 None => flags.push(name.to_owned()),
             }
         }
 
-        Some(TestCommand {
-            backend: backend.unwrap_or(Backend::Plugin),
+        Ok(TestCommand {
+            backend: backend.and_then(Backend::named).unwrap_or(Backend::Plugin),
             flags,
             paths,
         })
@@ -139,22 +141,24 @@ enum Command {
 }
 
 impl Command {
-    fn parse(arguments: &[impl AsRef<str>]) -> Option<Command> {
+    fn parse(arguments: &[impl AsRef<str>]) -> Result<Command, String> {
         let words: Vec<&str> = arguments.iter().map(AsRef::as_ref).collect();
 
         if words.iter().any(|word| matches!(*word, "--help" | "-h")) {
-            return Some(Command::Help);
+            return Ok(Command::Help);
         }
 
         if words.iter().any(|word| matches!(*word, "--version" | "-V")) {
-            return Some(Command::Version);
+            return Ok(Command::Version);
         }
 
         match words.as_slice() {
             ["test", options @ ..] => TestCommand::parse(options).map(Command::Test),
-            ["plugin", "install"] => Some(Command::PluginInstall),
-            ["plugin", "uninstall"] => Some(Command::PluginUninstall),
-            _ => None,
+            ["plugin", "install"] => Ok(Command::PluginInstall),
+            ["plugin", "uninstall"] => Ok(Command::PluginUninstall),
+            ["plugin", ..] => Err("plugin takes install or uninstall".to_owned()),
+            [] => Err("no command was given".to_owned()),
+            [word, ..] => Err(format!("{word} isn't a command")),
         }
     }
 
@@ -178,9 +182,12 @@ impl Command {
 fn main() -> ExitCode {
     let arguments: Vec<String> = env::args().skip(1).collect();
 
-    let Some(command) = Command::parse(&arguments) else {
-        eprint!("{HELP}");
-        return ExitCode::from(2);
+    let command = match Command::parse(&arguments) {
+        Ok(command) => command,
+        Err(problem) => {
+            eprintln!("litmus: {problem}; litmus --help lists the commands and options");
+            return ExitCode::from(2);
+        }
     };
 
     match command.run() {
@@ -273,12 +280,12 @@ fn manifest_of(project_dir: &Path, config: &Config, selection: &Selection) -> Re
 mod tests {
     use super::*;
 
-    fn test_on(backend: Backend, flags: &[&str]) -> Option<Command> {
+    fn test_on(backend: Backend, flags: &[&str]) -> Result<Command, String> {
         test_of(backend, flags, &[])
     }
 
-    fn test_of(backend: Backend, flags: &[&str], paths: &[&str]) -> Option<Command> {
-        Some(Command::Test(TestCommand {
+    fn test_of(backend: Backend, flags: &[&str], paths: &[&str]) -> Result<Command, String> {
+        Ok(Command::Test(TestCommand {
             backend,
             flags: flags.iter().map(|flag| (*flag).to_owned()).collect(),
             paths: paths.iter().map(|path| (*path).to_owned()).collect(),
@@ -288,27 +295,28 @@ mod tests {
     #[test]
     fn reads_each_command() {
         assert_eq!(Command::parse(&["test"]), test_on(Backend::Plugin, &[]));
-        assert_eq!(Command::parse(&["plugin", "install"]), Some(Command::PluginInstall));
-        assert_eq!(Command::parse(&["plugin", "uninstall"]), Some(Command::PluginUninstall));
-        assert_eq!(Command::parse(&["--help"]), Some(Command::Help));
-        assert_eq!(Command::parse(&["-h"]), Some(Command::Help));
-        assert_eq!(Command::parse(&["--version"]), Some(Command::Version));
-        assert_eq!(Command::parse(&["-V"]), Some(Command::Version));
+        assert_eq!(Command::parse(&["plugin", "install"]), Ok(Command::PluginInstall));
+        assert_eq!(Command::parse(&["plugin", "uninstall"]), Ok(Command::PluginUninstall));
+        assert_eq!(Command::parse(&["--help"]), Ok(Command::Help));
+        assert_eq!(Command::parse(&["-h"]), Ok(Command::Help));
+        assert_eq!(Command::parse(&["--version"]), Ok(Command::Version));
+        assert_eq!(Command::parse(&["-V"]), Ok(Command::Version));
     }
 
     #[test]
     fn reads_help_and_version_wherever_they_are() {
-        assert_eq!(Command::parse(&["test", "--help"]), Some(Command::Help));
-        assert_eq!(Command::parse(&["test", "--standalone", "--coverage", "-h"]), Some(Command::Help));
-        assert_eq!(Command::parse(&["plugin", "--version"]), Some(Command::Version));
-        assert_eq!(Command::parse(&["run", "-V"]), Some(Command::Version));
+        assert_eq!(Command::parse(&["test", "--help"]), Ok(Command::Help));
+        assert_eq!(Command::parse(&["test", "--standalone", "--coverage", "-h"]), Ok(Command::Help));
+        assert_eq!(Command::parse(&["plugin", "--version"]), Ok(Command::Version));
+        assert_eq!(Command::parse(&["run", "-V"]), Ok(Command::Version));
     }
 
     #[test]
-    fn refuses_anything_else() {
-        assert_eq!(Command::parse(&[] as &[&str]), None);
-        assert_eq!(Command::parse(&["run"]), None);
-        assert_eq!(Command::parse(&["plugin"]), None);
+    fn says_why_it_refuses_anything_else() {
+        assert_eq!(Command::parse(&[] as &[&str]), Err("no command was given".to_owned()));
+        assert_eq!(Command::parse(&["run"]), Err("run isn't a command".to_owned()));
+        assert_eq!(Command::parse(&["plugin"]), Err("plugin takes install or uninstall".to_owned()));
+        assert_eq!(Command::parse(&["plugin", "remove"]), Err("plugin takes install or uninstall".to_owned()));
     }
 
     #[test]
@@ -337,11 +345,13 @@ mod tests {
     }
 
     #[test]
-    fn refuses_options_that_do_not_add_up() {
-        assert_eq!(Command::parse(&["test", "--cloud", "--standalone"]), None);
-        assert_eq!(Command::parse(&["test", "--plugin", "--plugin"]), None);
-        assert_eq!(Command::parse(&["test", "-c"]), None);
-        assert_eq!(Command::parse(&["test", "--"]), None);
+    fn says_why_options_do_not_add_up() {
+        let refused = |words: &[&str]| Command::parse(words).unwrap_err();
+
+        assert_eq!(refused(&["test", "--cloud", "--standalone"]), "--cloud and --standalone each pick a backend, and a run takes one");
+        assert_eq!(refused(&["test", "--plugin", "--plugin"]), "--plugin and --plugin each pick a backend, and a run takes one");
+        assert!(refused(&["test", "-c"]).starts_with("-c isn't an option"));
+        assert_eq!(refused(&["test", "--"]), "-- names no flag");
     }
 
     #[test]
