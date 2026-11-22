@@ -2,6 +2,7 @@ local bridge = require("./Bridge")
 local harness = require("./Harness")
 local outcome = require("./Outcome")
 local place = require("./Place")
+local words = require("./Interface/Words")
 
 export type Arrival = {
     ran: outcome.Run,
@@ -84,7 +85,7 @@ local function answer(offer: bridge.Offer): Answer
         bridge.reportError(offer, ran.message)
         warn(`[Litmus]: couldn't run {offer.project}: {ran.message}`)
     elseif bridge.reportResults(offer, { specs = ran.specs, appendix = ran.appendix, failure = ran.failure }) then
-        print(`[Litmus]: ran {#ran.specs} specs for {offer.project}`)
+        print(`[Litmus]: ran {words.plural(#ran.specs, "spec")} for {offer.project}`)
     else
         warn(`[Litmus]: ran {offer.project}, but couldn't send the results back`)
     end
