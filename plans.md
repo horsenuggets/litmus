@@ -4,15 +4,16 @@ Last updated 2026-11-23. The cleanup is committed on `components`, phases 0 to 7
 
 ## 1. Fix what the Studio run found
 
-- [ ] **A lib error names the wrong line in Studio.** `Failures.spec`'s "points an error the lib raised at the test that caused it" fails in a plugin run. It expects `Lib.Failures.spec:25`, and gets `ReplicatedStorage.Litmus.Failure:90`.
+- [x] **A lib error names the wrong line in Studio.** `Failures.spec`'s "points an error the lib raised at the test that caused it" fails in a plugin run. It expects `Lib.Failures.spec:25`, and gets `ReplicatedStorage.Litmus.Failure:90`.
   - **Cause:** `0616be7` moved the "called outside a spec" check from `test`, `group` and `after` into a local helper that raises at level 3. In Studio the position lands one frame too high. Lune counts the frames as written, so the standalone run passes.
   - **Same risk:** `report`'s `refuse` raises at level 3 through a helper, and `checkText` and `checkTone` add a second layer at level 4. No spec checks where a report refusal points.
   - **Chosen fix (option 1):** each public function raises at level 2 itself, sharing only its message. A new spec pins where a report refusal points.
   - **What changes:** only the position in front of a message. A failure's code line and position in the plugin and the CLI already come from the stack walk, and stay as they are.
+  - **Done, not yet seen in Studio:** the standalone run passes with the new spec. The plugin run in the gate confirms it.
 - [ ] **A failure's message doesn't wrap in the results window.** It sits in the failure box above the code lines and runs off the edge, though `wrappedText` sets `TextWrapped`. Next check: whether the long message in `Interface.story.luau` wraps.
   - If it wraps there, the cause is in how the results window builds its rows.
   - If it doesn't, the cause is in `wrappedText`.
-- [ ] Remove the second blank line in `plugin/Interface/Components/IconLine.luau`, left by step 46.
+- [x] Remove the second blank line in `plugin/Interface/Components/IconLine.luau`, left by step 46.
 
 ## 2. Gate
 
