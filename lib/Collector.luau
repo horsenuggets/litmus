@@ -12,24 +12,25 @@ export type Collected = {
 local collecting: Collected? = nil
 local groups: { string } = {}
 
-local function collectingFor(call: string): Collected
-    local collected: Collected? = collecting
-    if not collected then
-        error(`[Litmus]: {call} called outside a spec`, 3)
-    end
-
-    return collected
+local function outsideSpec(call: string): string
+    return `[Litmus]: {call} called outside a spec`
 end
 
 local collector = {}
 
 function collector.test(name: string, run: () -> ()): ()
-    local collected: Collected = collectingFor("test")
+    local collected: Collected? = collecting
+    if not collected then
+        error(outsideSpec("test"), 2)
+    end
+
     table.insert(collected.tests, { name = name, groups = table.clone(groups), run = run })
 end
 
 function collector.group(name: string, body: () -> ()): ()
-    collectingFor("group")
+    if not collecting then
+        error(outsideSpec("group"), 2)
+    end
 
     table.insert(groups, name)
     body()
@@ -37,7 +38,10 @@ function collector.group(name: string, body: () -> ()): ()
 end
 
 function collector.after(name: string, run: () -> ()): ()
-    local collected: Collected = collectingFor("after")
+    local collected: Collected? = collecting
+    if not collected then
+        error(outsideSpec("after"), 2)
+    end
 
     if #groups > 0 then
         error("[Litmus]: after called inside a group; it covers the whole spec", 2)
