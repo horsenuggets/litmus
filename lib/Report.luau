@@ -58,20 +58,16 @@ local ALIGNS: { [string]: true } = { left = true, right = true }
 
 local MAX_PARTS: number = 10
 
-local function refuse(piece: string, problem: string, level: number?): never
-    error(`[Litmus]: report.{piece} {problem}`, level or 3)
+local function refusal(piece: string, problem: string): string
+    return `[Litmus]: report.{piece} {problem}`
 end
 
-local function checkText(piece: string, text: unknown): ()
-    if type(text) ~= "string" then
-        refuse(piece, `takes its text as a string, and got a {type(text)}`, 4)
-    end
+local function notText(text: unknown): string
+    return `takes its text as a string, and got a {type(text)}`
 end
 
-local function checkTone(piece: string, tone: unknown): ()
-    if not TONES[tone :: any] then
-        refuse(piece, `takes a tone of good, plain or dim, and got {tostring(tone)}`, 4)
-    end
+local function notTone(tone: unknown): string
+    return `takes a tone of good, plain or dim, and got {tostring(tone)}`
 end
 
 local function isList(value: unknown): boolean
@@ -90,26 +86,30 @@ end
 local report = {}
 
 function report.heading(text: string): Piece
-    checkText("heading", text)
+    if type(text) ~= "string" then
+        error(refusal("heading", notText(text)), 2)
+    end
 
     return { kind = "heading", text = text }
 end
 
 function report.text(text: string): Piece
-    checkText("text", text)
+    if type(text) ~= "string" then
+        error(refusal("text", notText(text)), 2)
+    end
 
     return { kind = "text", text = text }
 end
 
 function report.stats(entries: { { string } }): Piece
     if not isList(entries) then
-        refuse("stats", "takes a list of pairs, each a label and its text")
+        error(refusal("stats", "takes a list of pairs, each a label and its text"), 2)
     end
 
     local items: { Stat } = {}
     for index, pair in entries do
         if type(pair) ~= "table" or type(pair[1]) ~= "string" or type(pair[2]) ~= "string" then
-            refuse("stats", `takes each pair as a label and its text, both strings, and pair {index} isn't`)
+            error(refusal("stats", `takes each pair as a label and its text, both strings, and pair {index} isn't`), 2)
         end
 
         items[index] = { label = pair[1], text = pair[2] }
@@ -120,13 +120,13 @@ end
 
 function report.legend(entries: { { string } }): Piece
     if not isList(entries) then
-        refuse("legend", "takes a list of pairs, each a label and its tone")
+        error(refusal("legend", "takes a list of pairs, each a label and its tone"), 2)
     end
 
     local items: { Key } = {}
     for index, pair in entries do
         if type(pair) ~= "table" or type(pair[1]) ~= "string" or not TONES[pair[2]] then
-            refuse("legend", `takes each pair as a label and a tone of good, plain or dim, and pair {index} isn't`)
+            error(refusal("legend", `takes each pair as a label and a tone of good, plain or dim, and pair {index} isn't`), 2)
         end
 
         items[index] = { label = pair[1], tone = pair[2] :: Tone }
@@ -137,22 +137,24 @@ end
 
 function report.part(value: number, tone: Tone): Part
     if type(value) ~= "number" or value < 0 then
-        refuse("part", `takes its value as a number of zero or more, and got {tostring(value)}`)
+        error(refusal("part", `takes its value as a number of zero or more, and got {tostring(value)}`), 2)
     end
 
-    checkTone("part", tone)
+    if not TONES[tone] then
+        error(refusal("part", notTone(tone)), 2)
+    end
 
     return { value = value, tone = tone }
 end
 
 function report.meter(parts: { Part }): Meter
     if not isList(parts) or #parts > MAX_PARTS then
-        refuse("meter", `takes a list of up to {MAX_PARTS} parts, each made with report.part`)
+        error(refusal("meter", `takes a list of up to {MAX_PARTS} parts, each made with report.part`), 2)
     end
 
     for index, part in parts do
         if type(part) ~= "table" or type(part.value) ~= "number" or not TONES[part.tone] then
-            refuse("meter", `takes parts made with report.part, and part {index} isn't one`)
+            error(refusal("meter", `takes parts made with report.part, and part {index} isn't one`), 2)
         end
     end
 
@@ -160,34 +162,38 @@ function report.meter(parts: { Part }): Meter
 end
 
 function report.cell(text: string, options: CellOptions?): Styled
-    checkText("cell", text)
+    if type(text) ~= "string" then
+        error(refusal("cell", notText(text)), 2)
+    end
 
     local align: Align = if options and options.align then options.align else "left"
     local tone: Tone = if options and options.tone then options.tone else "plain"
 
     if not ALIGNS[align] then
-        refuse("cell", `takes an align of left or right, and got {tostring(align)}`)
+        error(refusal("cell", `takes an align of left or right, and got {tostring(align)}`), 2)
     end
 
-    checkTone("cell", tone)
+    if not TONES[tone] then
+        error(refusal("cell", notTone(tone)), 2)
+    end
 
     return { kind = "cell", text = text, align = align, tone = tone }
 end
 
 function report.row(cells: { Cell }, options: RowOptions?): Row
     if not isList(cells) then
-        refuse("row", "takes a list of cells, each a string, a report.cell or a report.meter")
+        error(refusal("row", "takes a list of cells, each a string, a report.cell or a report.meter"), 2)
     end
 
     for index, cell in cells do
         if not isCell(cell) then
-            refuse("row", `takes each cell as a string, a report.cell or a report.meter, and cell {index} isn't`)
+            error(refusal("row", `takes each cell as a string, a report.cell or a report.meter, and cell {index} isn't`), 2)
         end
     end
 
     local rows: { Row } = if options and options.rows then options.rows else {}
     if not isList(rows) then
-        refuse("row", "takes the rows under it as a list of rows made with report.row")
+        error(refusal("row", "takes the rows under it as a list of rows made with report.row"), 2)
     end
 
     return {
@@ -199,12 +205,12 @@ end
 
 function report.tree(rows: { Row }): Piece
     if not isList(rows) then
-        refuse("tree", "takes a list of rows, each made with report.row")
+        error(refusal("tree", "takes a list of rows, each made with report.row"), 2)
     end
 
     for index, row in rows do
         if type(row) ~= "table" or not isList(row.cells) then
-            refuse("tree", `takes rows made with report.row, and row {index} isn't one`)
+            error(refusal("tree", `takes rows made with report.row, and row {index} isn't one`), 2)
         end
     end
 
