@@ -18,7 +18,6 @@ export type Props = {
 local PADDING: number = 4
 local GAP: number = 6
 
-
 local function iconLine(scope: flux.Scope, props: Props): Frame
     local glyph: Frame = icon(scope, { name = props.icon, gradient = props.gradient })
 
