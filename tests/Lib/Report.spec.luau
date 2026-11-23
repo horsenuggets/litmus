@@ -60,6 +60,12 @@ group("a tree", function(): ()
     end)
 end)
 
+local function refusalAt(ask: () -> (), piece: string): string
+    local source: string, line: number = debug.info(ask, "sl")
+
+    return `{source}:{line + 1}: [Litmus]: report.{piece} takes`
+end
+
 group("refusals", function(): ()
     test("name the piece and what it takes", function(): ()
         local function headingOfNumber(): ()
@@ -107,6 +113,24 @@ group("refusals", function(): ()
         expect.error(cellToTheMiddle, "an align of left or right, and got middle")
         expect.error(rowOfNumbers, "cell 1 isn't")
         expect.error(treeOfText, "row 1 isn't one")
+    end)
+
+    test("point at the line that asked for the piece", function(): ()
+        local function headingOfNumber(): ()
+            report.heading(5 :: any)
+        end
+
+        local function statsOfText(): ()
+            report.stats("Coverage" :: any)
+        end
+
+        local function partOfNoTone(): ()
+            report.part(1, "loud" :: any)
+        end
+
+        expect.error(headingOfNumber, refusalAt(headingOfNumber, "heading"))
+        expect.error(statsOfText, refusalAt(statsOfText, "stats"))
+        expect.error(partOfNoTone, refusalAt(partOfNoTone, "part"))
     end)
 end)
 
