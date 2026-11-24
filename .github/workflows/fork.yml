@@ -1,0 +1,39 @@
+name: Test a fork
+
+# The workflow comes from main, never from the fork, and its one job waits for an approval before it starts
+on:
+  pull_request_target:
+
+permissions:
+  contents: read
+
+jobs:
+  cloud:
+    name: Specs in the cloud, from a fork
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+
+    # This environment needs a required reviewer, and holds the key as a secret of its own. Without the
+    # environment the key is missing and the run fails, so the fork's code never meets a key nobody approved
+    environment: fork
+
+    steps:
+      # The commit that was approved, not whatever the branch points at later
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      # Rojo builds both the plugin the CLI carries and the place the specs run in
+      - name: Install the tools
+        uses: CompeyDev/setup-rokit@v0.2.1
+
+      - name: Build the CLI
+        working-directory: cli
+        run: cargo build --locked
+
+      # Each run saves a new version of this place, which is kept for testing and never published
+      - name: Run the specs
+        env:
+          LITMUS_API_KEY: ${{ secrets.FORK_LITMUS_API_KEY }}
+        run: cli/target/debug/litmus test --cloud
