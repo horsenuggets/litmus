@@ -10,9 +10,10 @@ Last updated 2026-11-23. The cleanup is committed on `components`, phases 0 to 7
   - **Chosen fix (option 1):** each public function raises at level 2 itself, sharing only its message. A new spec pins where a report refusal points.
   - **What changes:** only the position in front of a message. A failure's code line and position in the plugin and the CLI already come from the stack walk, and stay as they are.
   - **Done, not yet seen in Studio:** the standalone run passes with the new spec. The plugin run in the gate confirms it.
-- [ ] **A failure's message doesn't wrap in the results window.** It sits in the failure box above the code lines and runs off the edge, though `wrappedText` sets `TextWrapped`. Next check: whether the long message in `Interface.story.luau` wraps.
+- [x] **A failure's message doesn't wrap in the results window.** It sits in the failure box above the code lines and runs off the edge, though `wrappedText` sets `TextWrapped`. Next check: whether the long message in `Interface.story.luau` wraps.
   - If it wraps there, the cause is in how the results window builds its rows.
   - If it doesn't, the cause is in `wrappedText`.
+  - **Not seen again:** on 2026-11-23 a plugin run with long failure messages, with and without spaces, wrapped in the results window. No code changed for it.
 - [x] Remove the second blank line in `plugin/Interface/Components/IconLine.luau`, left by step 46.
 
 ## 2. Gate
