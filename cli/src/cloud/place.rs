@@ -1,30 +1,19 @@
+use crate::rojo;
 use rbx_dom_weak::InstanceBuilder;
 use rbx_dom_weak::types::Variant;
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
-use std::process::{self, Command};
+use std::process;
 
 const SCRIPT_SERVICE: &str = "ServerScriptService";
 const LOADSTRING_SWITCH: &str = "LoadStringEnabled";
 
-/// The project as a place file whose scripts may use `loadstring`
 pub fn build(project_dir: &Path, rojo_project: Option<&Path>) -> Result<Vec<u8>, String> {
     let file = env::temp_dir().join(format!("litmus-{}.rbxl", process::id()));
 
-    let output = Command::new("rojo")
-        .arg("build")
-        .args(rojo_project)
-        .arg("--output")
-        .arg(&file)
-        .current_dir(project_dir)
-        .output()
-        .map_err(|error| format!("couldn't run rojo: {error}"))?;
-
-    if !output.status.success() {
-        let reason = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("rojo build failed: {}", reason.trim()));
-    }
+    rojo::run(project_dir, "build", rojo_project, &[OsStr::new("--output"), file.as_os_str()])?;
 
     let built = fs::read(&file).map_err(|error| format!("couldn't read the place rojo built: {error}"));
     let _ = fs::remove_file(&file);
@@ -32,7 +21,6 @@ pub fn build(project_dir: &Path, rojo_project: Option<&Path>) -> Result<Vec<u8>,
     allow_loadstring(&built?)
 }
 
-/// A place built some other way, likewise as a file whose scripts may use `loadstring`
 pub fn read(file: &Path) -> Result<Vec<u8>, String> {
     let binary = file
         .extension()
@@ -47,7 +35,6 @@ pub fn read(file: &Path) -> Result<Vec<u8>, String> {
     allow_loadstring(&place)
 }
 
-/// The lib loads every module with `loadstring`, which a server refuses unless its place switches it on
 fn allow_loadstring(place: &[u8]) -> Result<Vec<u8>, String> {
     let mut dom = rbx_binary::from_reader(place).map_err(|error| format!("couldn't read the place file: {error}"))?;
 
@@ -76,6 +63,7 @@ fn allow_loadstring(place: &[u8]) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::TempProject;
     use rbx_dom_weak::{Instance, WeakDom};
 
     fn place(services: Vec<InstanceBuilder>) -> Vec<u8> {
@@ -125,11 +113,11 @@ mod tests {
 
     #[test]
     fn reads_a_place_built_elsewhere() {
-        let file = env::temp_dir().join(format!("litmus-{}-reads.rbxl", process::id()));
+        let project = TempProject::new("reads");
+        let file = project.join("place.rbxl");
         fs::write(&file, place(vec![InstanceBuilder::new("ReplicatedStorage")])).unwrap();
 
         let allowed = read(&file);
-        fs::remove_file(&file).unwrap();
 
         let dom = rbx_binary::from_reader(allowed.unwrap().as_slice()).unwrap();
 

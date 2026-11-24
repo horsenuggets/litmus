@@ -10,7 +10,6 @@ export type Props = {
     text: string,
     color: flux.UsedAs<Color3>,
 
-    -- Shown under the text and as wide as it
     children: any?,
 
     layoutOrder: number?,
@@ -19,11 +18,9 @@ export type Props = {
 local PADDING: number = 4
 local GAP: number = 6
 
--- The text starts past the icon, as the text of a row's head starts past its arrow
-local TEXT_INDENT: number = theme.iconSize + theme.rowGap
-
--- An icon with text beside it that wraps, padded to line up with the heads of the rows around it
 local function iconLine(scope: flux.Scope, props: Props): Frame
+    local glyph: Frame = icon(scope, { name = props.icon, gradient = props.gradient })
+
     return scope:element "Frame" {
         Name = props.text,
         LayoutOrder = props.layoutOrder,
@@ -38,10 +35,7 @@ local function iconLine(scope: flux.Scope, props: Props): Frame
             PaddingBottom = UDim.new(0, PADDING),
         },
 
-        scope:hydrate(icon(scope, {
-            name = props.icon,
-            gradient = props.gradient,
-        })) {
+        scope:hydrate(glyph) {
             AnchorPoint = Vector2.zero,
             Position = UDim2.new(),
         },
@@ -50,10 +44,10 @@ local function iconLine(scope: flux.Scope, props: Props): Frame
             Name = "Body",
 
             AnchorPoint = Vector2.zero,
-            Position = UDim2.fromOffset(TEXT_INDENT, 0),
+            Position = UDim2.fromOffset(theme.rowIndent, 0),
 
             AutomaticSize = Enum.AutomaticSize.Y,
-            Size = UDim2.new(1, -TEXT_INDENT, 0, 0),
+            Size = UDim2.new(1, -theme.rowIndent, 0, 0),
 
             scope:element "UIListLayout" {
                 Padding = UDim.new(0, GAP),
@@ -68,7 +62,6 @@ local function iconLine(scope: flux.Scope, props: Props): Frame
                 color = props.color,
             }),
 
-            -- Held in a frame of their own, so whatever is passed in needs no layout order to land under the text
             if props.children
                 then scope:element "Frame" {
                     Name = "Under",

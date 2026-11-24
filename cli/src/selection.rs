@@ -1,5 +1,3 @@
-use crate::standalone::relative;
-
 #[derive(Default, Debug, PartialEq)]
 pub struct Selection {
     paths: Vec<String>,
@@ -33,6 +31,19 @@ impl Selection {
     }
 }
 
+pub fn relative(path: &str) -> Result<String, String> {
+    if path.starts_with(['/', '\\']) || path.contains(':') {
+        return Err(format!("\"{path}\" has to be a path from the project's folder"));
+    }
+
+    let names: Vec<&str> = path
+        .split(['/', '\\'])
+        .filter(|name| !name.is_empty() && *name != ".")
+        .collect();
+
+    Ok(names.join("/"))
+}
+
 fn holds(path: &str, file: &str) -> bool {
     path.is_empty() || file == path || file.strip_prefix(path).is_some_and(|rest| rest.starts_with('/'))
 }
@@ -51,6 +62,17 @@ mod tests {
         let paths: Vec<String> = paths.iter().map(|path| (*path).to_owned()).collect();
 
         Selection::of(&paths)?.narrow(specs())
+    }
+
+    #[test]
+    fn a_path_is_written_from_the_project_with_forward_slashes() {
+        assert_eq!(relative("tests"), Ok("tests".to_owned()));
+        assert_eq!(relative("./a\\b//c/"), Ok("a/b/c".to_owned()));
+        assert_eq!(relative("../lib"), Ok("../lib".to_owned()));
+        assert_eq!(relative("."), Ok(String::new()));
+
+        assert!(relative("/usr/lib").is_err());
+        assert!(relative("C:\\lib").is_err());
     }
 
     #[test]

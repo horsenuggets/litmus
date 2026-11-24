@@ -3,7 +3,6 @@ local replicatedStorage = game:GetService("ReplicatedStorage")
 
 local LIB_NAME: string = "Litmus"
 
--- The CLI wraps this file in a function and calls it with the specs to run, as JSON
 local specsJson: string = ...
 
 local function moduleIn(parent: Instance, name: string): ModuleScript
@@ -46,5 +45,4 @@ if not chunk then
     error(`[Litmus]: {entry:GetFullName()} didn't compile: {problem}`, 0)
 end
 
--- Encoded here and not left to Open Cloud, so the results reach the CLI in the form the plugin sends them
 return httpService:JSONEncode(chunk().run(lib, specs))

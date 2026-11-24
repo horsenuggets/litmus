@@ -1,0 +1,108 @@
+local collapsible = require("../Components/Collapsible")
+local failureBox = require("./FailureBox")
+local flux = require("../../Packages/Flux")
+local icon = require("../Components/Icon")
+local label = require("../Components/Label")
+local outcome = require("../../Outcome")
+local padded = require("./Padded")
+local paths = require("../Paths")
+local statusStyle = require("./StatusStyle")
+local testList = require("./TestList")
+local theme = require("../Theme")
+local words = require("../Words")
+
+export type Props = {
+    spec: outcome.SpecResult,
+
+    root: outcome.Path,
+
+    layoutOrder: number?,
+}
+
+local HEIGHT: number = 30
+
+local FAILURE_BOTTOM: number = 4
+
+local function specRow(scope: flux.Scope, props: Props): Frame
+    local colors: theme.Colors = theme.colors(scope)
+    local spec: outcome.SpecResult = props.spec
+
+    local status: outcome.Status = outcome.statusOf(spec)
+    local style: statusStyle.Style = statusStyle(scope, status)
+
+    local specFailure: outcome.Failure? = spec.failure
+    local hasDetails: boolean = specFailure ~= nil or #spec.tests > 0
+
+    return collapsible(scope, {
+        layoutOrder = props.layoutOrder,
+
+        height = HEIGHT,
+
+        startsOpen = status ~= "PASS",
+
+        head = {
+            icon(scope, {
+                layoutOrder = 1,
+
+                name = style.icon,
+                gradient = style.gradient,
+            }),
+
+            label(scope, {
+                layoutOrder = 2,
+
+                text = paths.name(spec.path),
+                font = theme.boldFont,
+                size = theme.bodyTextSize,
+                color = colors.brightText,
+            }),
+
+            label(scope, {
+                layoutOrder = 3,
+                truncated = true,
+
+                text = paths.fullName(paths.relativeTo(paths.parent(spec.path), props.root)),
+                font = theme.mainFont,
+                size = theme.smallTextSize,
+                color = colors.subText,
+            }),
+
+            label(scope, {
+                layoutOrder = 4,
+
+                text = if status == "ERROR" then "didn't load" else words.testNote(#spec.tests, outcome.failedCount(spec.tests)),
+                font = theme.mainFont,
+                size = theme.smallTextSize,
+                color = if status == "PASS" then colors.subText else style.color,
+            }),
+        },
+
+        content = if hasDetails
+            then function(inner: flux.Scope): { Instance }
+                local built: { Instance } = {}
+
+                if specFailure then
+                    table.insert(built, padded(inner, {
+                        name = "Failure",
+                        layoutOrder = 1,
+
+                        bottom = FAILURE_BOTTOM,
+
+                        children = failureBox(inner, { failure = specFailure, color = style.color }),
+                    }))
+                end
+
+                if #spec.tests > 0 then
+                    table.insert(built, testList(inner, {
+                        layoutOrder = 2,
+                        tests = spec.tests,
+                    }))
+                end
+
+                return built
+            end
+            else nil,
+    })
+end
+
+return specRow

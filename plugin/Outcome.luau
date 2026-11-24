@@ -1,7 +1,5 @@
--- The names leading to a script from the top of the place
 export type Path = { string }
 
--- The lib's results, as it returns them
 export type Failure = {
     message: string,
     source: Path,
@@ -21,10 +19,49 @@ export type SpecResult = {
     failure: Failure?,
 }
 
--- What came of a run: its results, or why there are none
+export type Tone = "good" | "plain" | "dim"
+
+export type Part = {
+    value: number,
+    tone: Tone,
+}
+
+export type Cell = string | { kind: "cell", text: string, align: "left" | "right", tone: Tone } | { kind: "meter", parts: { Part } }
+
+export type Row = {
+    cells: { Cell },
+    open: boolean,
+    rows: { Row },
+}
+
+export type Stat = {
+    label: string,
+    text: string,
+}
+
+export type Key = {
+    label: string,
+    tone: Tone,
+}
+
+export type Piece =
+    { kind: "heading", text: string }
+    | { kind: "text", text: string }
+    | { kind: "stats", items: { Stat } }
+    | { kind: "legend", items: { Key } }
+    | { kind: "tree", rows: { Row } }
+
+export type Appendix = { Piece }
+
 export type Run =
-    { kind: "results", results: { SpecResult }, appendix: string?, failure: string? }
+    { kind: "results", specs: { SpecResult }, appendix: Appendix?, failure: string? }
     | { kind: "problem", message: string }
+
+export type LibRun = {
+    specs: { SpecResult },
+    appendix: Appendix?,
+    failure: string?,
+}
 
 export type Status = "PASS" | "FAIL" | "ERROR"
 
@@ -37,11 +74,19 @@ export type Tally = {
     failedTests: number,
 }
 
+export type Arranged = {
+    wrong: { SpecResult },
+    passed: { SpecResult },
+}
+
 local outcome = {}
 
--- A run that couldn't happen has no specs to show, which is what everything counting them should see
-function outcome.resultsOf(ran: Run): { SpecResult }
-    return if ran.kind == "results" then ran.results else {}
+function outcome.ofLib(ran: LibRun): Run
+    return { kind = "results", specs = ran.specs, appendix = ran.appendix, failure = ran.failure }
+end
+
+function outcome.specsOf(ran: Run): { SpecResult }
+    return if ran.kind == "results" then ran.specs else {}
 end
 
 function outcome.failedCount(tests: { TestResult }): number
@@ -56,7 +101,6 @@ function outcome.failedCount(tests: { TestResult }): number
     return failed
 end
 
--- A spec that didn't load is an error, apart from one that loaded and had a test fail
 function outcome.statusOf(spec: SpecResult): Status
     if spec.failure then
         return "ERROR"
@@ -95,8 +139,7 @@ function outcome.specCount(tally: Tally, status: Status): number
     return if status == "FAIL" then tally.failedSpecs else tally.passedSpecs
 end
 
--- The specs with something wrong, then the ones that passed, each in the order they ran; `only` keeps one status
-function outcome.arranged(results: { SpecResult }, only: Status?): ({ SpecResult }, { SpecResult })
+function outcome.arranged(results: { SpecResult }, only: Status?): Arranged
     local wrong: { SpecResult } = {}
     local passed: { SpecResult } = {}
 
@@ -110,7 +153,7 @@ function outcome.arranged(results: { SpecResult }, only: Status?): ({ SpecResult
         table.insert(if status == "PASS" then passed else wrong, spec)
     end
 
-    return wrong, passed
+    return { wrong = wrong, passed = passed }
 end
 
 return outcome

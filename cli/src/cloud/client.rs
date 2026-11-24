@@ -1,4 +1,4 @@
-use super::Place;
+use super::Target;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -9,17 +9,15 @@ use ureq::{Agent, Body};
 const ORIGIN: &str = "https://apis.roblox.com";
 const KEY_HEADER: &str = "x-api-key";
 
-/// For one request, the largest of which uploads the whole place
 const TIMEOUT: Duration = Duration::from_secs(300);
 
 const PERMISSIONS_HINT: &str =
     "does the key have universe-places and luau-execution-sessions Write on this experience?";
 
 #[derive(Debug, PartialEq)]
-pub enum Progress {
+pub enum TaskState {
     Running,
 
-    /// With what the task's script returned
     Complete(Vec<Value>),
     Failed(String),
 }
@@ -57,21 +55,20 @@ struct Problem {
 }
 
 impl Task {
-    fn progress(self) -> Progress {
+    fn progress(self) -> TaskState {
         match self.state.as_str() {
-            "COMPLETE" => Progress::Complete(self.output.map(|output| output.results).unwrap_or_default()),
-            "FAILED" => Progress::Failed(match self.error {
+            "COMPLETE" => TaskState::Complete(self.output.map(|output| output.results).unwrap_or_default()),
+            "FAILED" => TaskState::Failed(match self.error {
                 Some(problem) if !problem.message.is_empty() => problem.message,
                 Some(problem) if !problem.code.is_empty() => problem.code,
                 _ => "Open Cloud gave no reason".to_owned(),
             }),
-            "CANCELLED" => Progress::Failed("it was cancelled".to_owned()),
-            _ => Progress::Running,
+            "CANCELLED" => TaskState::Failed("it was cancelled".to_owned()),
+            _ => TaskState::Running,
         }
     }
 }
 
-/// Roblox's Open Cloud, as far as a test run needs it
 pub struct Client {
     agent: Agent,
     key: String,
@@ -85,7 +82,6 @@ impl Client {
 
     fn at(origin: &str, key: String) -> Client {
         let agent = Agent::config_builder()
-            // Left to `read`, since the reason a request was refused is in its body
             .http_status_as_error(false)
             .timeout_global(Some(TIMEOUT))
             .build()
@@ -98,11 +94,10 @@ impl Client {
         }
     }
 
-    /// Saves `file` as the place's newest version, without publishing it, and returns that version's number
-    pub fn upload(&self, place: &Place, file: &[u8]) -> Result<u64, String> {
+    pub fn upload(&self, target: &Target, file: &[u8]) -> Result<u64, String> {
         let url = format!(
             "{}/universes/v1/{}/places/{}/versions?versionType=Saved",
-            self.origin, place.universe, place.place
+            self.origin, target.universe, target.place
         );
 
         let response = self
@@ -116,11 +111,10 @@ impl Client {
         Ok(uploaded.version_number)
     }
 
-    /// Starts `script` in a server of its own holding that version of the place, and returns the task to ask after
-    pub fn start(&self, place: &Place, version: u64, script: &str) -> Result<String, String> {
+    pub fn start(&self, target: &Target, version: u64, script: &str) -> Result<String, String> {
         let url = format!(
             "{}/cloud/v2/universes/{}/places/{}/versions/{version}/luau-execution-session-tasks",
-            self.origin, place.universe, place.place
+            self.origin, target.universe, target.place
         );
 
         let response = self
@@ -134,7 +128,7 @@ impl Client {
         Ok(started.path)
     }
 
-    pub fn progress(&self, task: &str) -> Result<Progress, String> {
+    pub fn progress(&self, task: &str) -> Result<TaskState, String> {
         let url = format!("{}/cloud/v2/{task}", self.origin);
         let response = self.agent.get(&url).header(KEY_HEADER, &self.key).call();
 
@@ -143,7 +137,6 @@ impl Client {
     }
 }
 
-/// What Open Cloud answered, or why the request to `action` came to nothing
 fn read<T: DeserializeOwned>(action: &str, response: Result<Response<Body>, ureq::Error>) -> Result<T, String> {
     let mut response = response.map_err(|error| format!("couldn't {action}: {error}"))?;
     let status = response.status();
@@ -170,7 +163,7 @@ mod tests {
     use std::thread;
     use tiny_http::{Header, Server};
 
-    const PLACE: Place = Place {
+    const TARGET: Target = Target {
         universe: 11,
         place: 22,
         build: None,
@@ -193,7 +186,6 @@ mod tests {
         }
     }
 
-    /// Plays Open Cloud's part: answers one request with `status` and `body`, and hands back what was asked
     fn fake(status: u16, body: &'static str) -> (Client, thread::JoinHandle<Asked>) {
         let server = Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
@@ -228,7 +220,7 @@ mod tests {
             .map(|header| header.value.as_str().to_owned())
     }
 
-    fn progress(task: &'static str) -> Progress {
+    fn progress(task: &'static str) -> TaskState {
         let (client, handle) = fake(200, task);
         let progress = client.progress("universes/11/tasks/abc").unwrap();
         handle.join().unwrap();
@@ -240,7 +232,7 @@ mod tests {
     fn uploads_the_place_as_a_saved_version() {
         let (client, handle) = fake(200, r#"{ "versionNumber": 7 }"#);
 
-        assert_eq!(client.upload(&PLACE, b"<roblox!"), Ok(7));
+        assert_eq!(client.upload(&TARGET, b"<roblox!"), Ok(7));
         assert_eq!(
             handle.join().unwrap(),
             asked("POST", "/universes/v1/11/places/22/versions?versionType=Saved", b"<roblox!")
@@ -251,7 +243,7 @@ mod tests {
     fn starts_a_task_in_the_version_it_is_given() {
         let (client, handle) = fake(200, r#"{ "path": "universes/11/tasks/abc", "state": "QUEUED" }"#);
 
-        assert_eq!(client.start(&PLACE, 7, "return 1"), Ok("universes/11/tasks/abc".to_owned()));
+        assert_eq!(client.start(&TARGET, 7, "return 1"), Ok("universes/11/tasks/abc".to_owned()));
         assert_eq!(
             handle.join().unwrap(),
             asked(
@@ -266,32 +258,32 @@ mod tests {
     fn asks_after_a_task_by_its_path() {
         let (client, handle) = fake(200, r#"{ "state": "PROCESSING" }"#);
 
-        assert_eq!(client.progress("universes/11/tasks/abc"), Ok(Progress::Running));
+        assert_eq!(client.progress("universes/11/tasks/abc"), Ok(TaskState::Running));
         assert_eq!(handle.join().unwrap(), asked("GET", "/cloud/v2/universes/11/tasks/abc", b""));
     }
 
     #[test]
     fn reads_how_a_task_ended() {
-        assert_eq!(progress(r#"{ "state": "QUEUED" }"#), Progress::Running);
+        assert_eq!(progress(r#"{ "state": "QUEUED" }"#), TaskState::Running);
         assert_eq!(
             progress(r#"{ "state": "COMPLETE", "output": { "results": ["[]"] } }"#),
-            Progress::Complete(vec![json!("[]")])
+            TaskState::Complete(vec![json!("[]")])
         );
         assert_eq!(
             progress(r#"{ "state": "FAILED", "error": { "code": "SCRIPT_ERROR", "message": "boom" } }"#),
-            Progress::Failed("boom".to_owned())
+            TaskState::Failed("boom".to_owned())
         );
         assert_eq!(
             progress(r#"{ "state": "FAILED", "error": { "code": "DEADLINE_EXCEEDED" } }"#),
-            Progress::Failed("DEADLINE_EXCEEDED".to_owned())
+            TaskState::Failed("DEADLINE_EXCEEDED".to_owned())
         );
-        assert_eq!(progress(r#"{ "state": "CANCELLED" }"#), Progress::Failed("it was cancelled".to_owned()));
+        assert_eq!(progress(r#"{ "state": "CANCELLED" }"#), TaskState::Failed("it was cancelled".to_owned()));
     }
 
     #[test]
     fn a_refusal_carries_what_open_cloud_said() {
         let (client, handle) = fake(429, r#"{ "message": "too many tasks" }"#);
-        let problem = client.start(&PLACE, 7, "return 1").unwrap_err();
+        let problem = client.start(&TARGET, 7, "return 1").unwrap_err();
         handle.join().unwrap();
 
         assert!(problem.starts_with("couldn't start the task: Open Cloud answered 429"), "{problem}");
@@ -301,7 +293,7 @@ mod tests {
     #[test]
     fn a_key_that_is_turned_away_is_told_what_it_needs() {
         let (client, handle) = fake(403, "{}");
-        let problem = client.upload(&PLACE, b"").unwrap_err();
+        let problem = client.upload(&TARGET, b"").unwrap_err();
         handle.join().unwrap();
 
         assert!(problem.contains("403"), "{problem}");

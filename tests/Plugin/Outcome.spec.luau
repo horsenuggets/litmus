@@ -88,36 +88,45 @@ end)
 
 group("arranged", function(): ()
     test("puts the specs with something wrong first, each kind in the order it ran", function(): ()
-        local wrong: { outcome.SpecResult }, passed: { outcome.SpecResult } =
-            outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED })
+        local arranged: outcome.Arranged = outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED })
 
-        expect.same(wrong, { FAILED, ERRORED })
-        expect.same(passed, { PASSED, EMPTY })
+        expect.same(arranged, { wrong = { FAILED, ERRORED }, passed = { PASSED, EMPTY } })
     end)
 
     test("keeps one status when asked for it", function(): ()
-        local wrong: { outcome.SpecResult }, passed: { outcome.SpecResult } =
-            outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED }, "FAIL")
+        local arranged: outcome.Arranged = outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED }, "FAIL")
 
-        expect.same(wrong, { FAILED })
-        expect.same(passed, {})
+        expect.same(arranged, { wrong = { FAILED }, passed = {} })
     end)
 
     test("keeps the passing specs when asked for those", function(): ()
-        local wrong: { outcome.SpecResult }, passed: { outcome.SpecResult } =
-            outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED }, "PASS")
+        local arranged: outcome.Arranged = outcome.arranged({ PASSED, FAILED, EMPTY, ERRORED }, "PASS")
 
-        expect.same(wrong, {})
-        expect.same(passed, { PASSED, EMPTY })
+        expect.same(arranged, { wrong = {}, passed = { PASSED, EMPTY } })
     end)
 end)
 
-group("resultsOf", function(): ()
-    test("gives a run's results", function(): ()
-        expect.same(outcome.resultsOf({ kind = "results", results = { PASSED, FAILED } }), { PASSED, FAILED })
+group("ofLib", function(): ()
+    test("makes a run of what the lib returned", function(): ()
+        local appendix: outcome.Appendix = { { kind = "text", text = "text" } }
+
+        expect.same(outcome.ofLib({ specs = { PASSED }, appendix = appendix, failure = "too little ran" }), {
+            kind = "results",
+            specs = { PASSED },
+            appendix = appendix,
+            failure = "too little ran",
+        })
+
+        expect.same(outcome.ofLib({ specs = {} }), { kind = "results", specs = {} })
+    end)
+end)
+
+group("specsOf", function(): ()
+    test("gives a run's specs", function(): ()
+        expect.same(outcome.specsOf({ kind = "results", specs = { PASSED, FAILED } }), { PASSED, FAILED })
     end)
 
-    test("gives no results for a run that couldn't happen", function(): ()
-        expect.same(outcome.resultsOf({ kind = "problem", message = "no specs" }), {})
+    test("gives no specs for a run that couldn't happen", function(): ()
+        expect.same(outcome.specsOf({ kind = "problem", message = "no specs" }), {})
     end)
 end)

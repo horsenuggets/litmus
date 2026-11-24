@@ -1,10 +1,10 @@
 local collector = require("./Collector")
 local failure = require("./Failure")
+local report = require("./Report")
 
 export type Failure = {
     message: string,
 
-    -- The names leading to the script from the top of the place
     source: { string },
     line: number,
     trace: string,
@@ -20,7 +20,6 @@ export type SpecResult = {
     path: { string },
     tests: { TestResult },
 
-    -- Set when the spec itself didn't load, in which case none of its tests ran
     failure: Failure?,
 }
 
@@ -37,13 +36,13 @@ export type Adapter = {
 }
 
 export type Remarks = {
-    appendix: string?,
+    appendix: { report.Piece }?,
     failure: string?,
 }
 
 export type Run = {
     specs: { SpecResult },
-    appendix: string?,
+    appendix: { report.Piece }?,
     failure: string?,
 }
 
@@ -56,8 +55,7 @@ export type Progress =
 
 type Tell = (event: Progress) -> ()
 
--- A failure knows its script only by the name the chunk ran under, which the adapter turns back into the script
-local function report(adapter: Adapter, caught: failure.Failure?): Failure?
+local function placed(adapter: Adapter, caught: failure.Caught?): Failure?
     if not caught then
         return nil
     end
@@ -65,19 +63,18 @@ local function report(adapter: Adapter, caught: failure.Failure?): Failure?
     return {
         message = caught.message,
 
-        -- A chunk the adapter can't place has nothing but that name to go by
-        source = adapter.locate(caught.source) or { caught.source },
+        source = adapter.locate(caught.chunk) or { caught.chunk },
         line = caught.line,
         trace = caught.trace,
     }
 end
 
 local function catch(adapter: Adapter, body: () -> ()): Failure?
-    local caught: failure.Failure? = failure.catch(body, function(chunk: string): boolean
+    local caught: failure.Caught? = failure.catch(body, function(chunk: string): boolean
         return adapter.locate(chunk) ~= nil
     end)
 
-    return report(adapter, caught)
+    return placed(adapter, caught)
 end
 
 type Running = {
@@ -177,7 +174,12 @@ local function remarksOf(adapter: Adapter, results: { SpecResult }): Remarks
     end
 
     if type(remarks) ~= "table" then
-        error(`[Litmus]: the adapter's results returned a {type(remarks)}; they return a table, with any text to print as its appendix`, 0)
+        error(`[Litmus]: the adapter's results returned a {type(remarks)}; they return a table, with an appendix and a failure, both optional`, 0)
+    end
+
+    local appendix: unknown = (remarks :: any).appendix
+    if appendix ~= nil and type(appendix) ~= "table" then
+        error(`[Litmus]: the adapter's results gave its appendix as a {type(appendix)}; an appendix is a list of pieces, and report.text makes one of plain text`, 0)
     end
 
     return remarks :: any
@@ -185,7 +187,6 @@ end
 
 local runner = {}
 
--- The adapter's specs must require this copy of the lib, or they register with another
 function runner.run(adapter: Adapter, observe: Tell?): Run
     local results: { SpecResult } = {}
     local running: Running = { count = 0, waiter = nil }

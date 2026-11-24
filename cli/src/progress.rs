@@ -1,15 +1,15 @@
-use crate::report::{self, BOLD, GREEN, RED};
+use crate::style::{GREEN, Labelled, RED, badge, counts, headline, labelled};
 use anstyle::{AnsiColor, Color, Style};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::io::{self, IsTerminal, Write};
 use std::time::{Duration, Instant};
 
-const LOAD_BADGE: Style = report::badge(AnsiColor::Black, Color::Ansi(AnsiColor::White));
-const RUN_BADGE: Style = report::badge(AnsiColor::Black, Color::Ansi(AnsiColor::Cyan));
+const LOAD_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::White));
+const RUN_BADGE: Style = badge(AnsiColor::Black, Color::Ansi(AnsiColor::Cyan));
 
-const MAX_LISTED: usize = 5;
-const PAUSE: Duration = Duration::from_millis(100);
+const MAX_SPECS_LISTED: usize = 5;
+const REDRAW_INTERVAL: Duration = Duration::from_millis(100);
 
 const WRAP_OFF: &str = "\x1b[?7l";
 const WRAP_ON: &str = "\x1b[?7h";
@@ -92,7 +92,7 @@ impl Progress {
 
         let mut rows: Vec<(Style, &str, String, String)> = Vec::new();
 
-        for (spec, running) in self.running.iter().take(MAX_LISTED) {
+        for (spec, running) in self.running.iter().take(MAX_SPECS_LISTED) {
             let note = format!("{} of {} tests", running.finished, running.tests);
             rows.push((RUN_BADGE, "RUN", self.name(*spec), note));
         }
@@ -105,10 +105,10 @@ impl Progress {
 
         let mut lines: Vec<String> = rows
             .iter()
-            .map(|(style, label, name, note)| report::headline(*style, label, name, width, note))
+            .map(|(style, label, name, note)| headline(*style, label, name, width, note))
             .collect();
 
-        let unlisted = self.running.len().saturating_sub(MAX_LISTED);
+        let unlisted = self.running.len().saturating_sub(MAX_SPECS_LISTED);
         if unlisted > 0 {
             lines.push(format!("          and {unlisted} more running"));
         }
@@ -117,11 +117,11 @@ impl Progress {
             lines.push(String::new());
         }
 
-        let tests = report::counts(&[(self.failed, "failed", RED), (self.passed, "passed", GREEN)]);
-
-        lines.push(format!(" {}  {} of {} done", report::paint(BOLD, "Specs"), self.done, self.specs.len()));
-        lines.push(format!(" {}  {tests}", report::paint(BOLD, "Tests")));
-        lines.push(format!(" {}   {time}", report::paint(BOLD, "Time")));
+        lines.extend(labelled(&[
+            Labelled { label: "Specs", value: format!("{} of {} done", self.done, self.specs.len()) },
+            Labelled { label: "Tests", value: counts(&[(self.failed, "failed", RED), (self.passed, "passed", GREEN)]) },
+            Labelled { label: "Time", value: time },
+        ]));
 
         lines
     }
@@ -174,7 +174,7 @@ impl Display {
     }
 
     pub fn refresh(&mut self) {
-        if self.drawn.elapsed() >= PAUSE {
+        if self.drawn.elapsed() >= REDRAW_INTERVAL {
             self.draw();
         }
     }
@@ -227,6 +227,7 @@ fn write(text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::without_colour;
 
     fn progress() -> Progress {
         Progress::new(vec!["tests/a.spec.luau".to_owned(), "tests/longer.spec.luau".to_owned()])
@@ -236,7 +237,7 @@ mod tests {
         progress
             .lines(Duration::from_secs(seconds))
             .iter()
-            .map(|line| anstream::adapter::strip_str(line).to_string())
+            .map(|line| without_colour(line))
             .collect()
     }
 

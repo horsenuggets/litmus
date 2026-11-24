@@ -1,6 +1,3 @@
--- Checks the lib without its test API, so a broken expect can't pass itself
--- Run from the command bar: loadstring(game.ReplicatedStorage.Tests.Core.Source)()
-
 local replicatedStorage = game:GetService("ReplicatedStorage")
 
 local lib = replicatedStorage.Litmus
@@ -25,7 +22,6 @@ type SpecResult = {
     failure: Failure?,
 }
 
--- Lists only the fields to compare, which leaves out engine wording
 type ExpectedFailure = {
     message: string?,
     line: number,
@@ -37,10 +33,8 @@ type ExpectedTest = {
     failure: ExpectedFailure?,
 }
 
--- Where the spec's copy sits once it is run, which is also where each of its failures must point
-local PATH: string = "Interface/Expect.spec"
+local PATH: string = "Lib/Expect.spec"
 
--- Every spec takes `expect` at its word, so its own results are the ones checked by hand
 local EXPECTED: { ExpectedTest } = {
     { name = "passes on equal values", groups = { "equal" } },
     {
@@ -85,31 +79,31 @@ local EXPECTED: { ExpectedTest } = {
     {
         name = "fails on nil",
         groups = { "truthy" },
-        failure = { message = "expected a truthy value, got nil", line = 74 },
+        failure = { message = "expected a truthy value, got nil", line = 73 },
     },
     {
         name = "fails on false",
         groups = { "truthy" },
-        failure = { message = "expected a truthy value, got false", line = 78 },
+        failure = { message = "expected a truthy value, got false", line = 77 },
     },
     { name = "passes on different values", groups = { "never.equal" } },
     { name = "passes on separate tables with the same contents", groups = { "never.equal" } },
     {
         name = "fails on equal values",
         groups = { "never.equal" },
-        failure = { message = 'expected anything but "left"', line = 92 },
+        failure = { message = 'expected anything but "left"', line = 91 },
     },
     { name = "passes where a nested value differs", groups = { "never.same" } },
     {
         name = "fails on tables with the same contents",
         groups = { "never.same" },
-        failure = { message = "expected different contents, got the same", line = 102 },
+        failure = { message = "expected different contents, got the same", line = 101 },
     },
     { name = "passes on nil and on false", groups = { "never.truthy" } },
     {
         name = "fails on a value that counts as true",
         groups = { "never.truthy" },
-        failure = { message = 'expected nil or false, got "set"', line = 113 },
+        failure = { message = 'expected nil or false, got "set"', line = 112 },
     },
     { name = "passes when the error contains the text", groups = { "error" } },
     { name = "passes when a position comes before the text", groups = { "error" } },
@@ -117,12 +111,12 @@ local EXPECTED: { ExpectedTest } = {
     {
         name = "fails when the error says something else",
         groups = { "error" },
-        failure = { message = 'expected an error containing "no fuse", got "the fuse is lit"', line = 145 },
+        failure = { message = 'expected an error containing "no fuse", got "the fuse is lit"', line = 144 },
     },
     {
         name = "fails when the function meant to throw the text returns",
         groups = { "error" },
-        failure = { message = 'expected an error containing "fuse", got none', line = 149 },
+        failure = { message = 'expected an error containing "fuse", got none', line = 148 },
     },
 }
 
@@ -181,19 +175,17 @@ local function compareTests(actual: { TestResult }, expected: { ExpectedTest }):
     end
 end
 
--- Run as a copy kept out of the place: named as a spec there, it would fail in every other run
-local copies: Instance = tests.Anchor.Interface:Clone()
+local copies: Instance = tests.Anchor.Lib:Clone()
 
 local spec: Instance? = copies:FindFirstChild("Expect")
 if not spec then
-    error("[Core]: Tests.Anchor.Interface has no module named Expect", 0)
+    error("[Core]: Tests.Anchor.Lib has no module named Expect", 0)
 end
 
 spec.Name ..= ".spec"
 
 local entry = lib.Adapter.Roblox
 
--- Loaded straight from its source, so Studio's require cache stays out of it
 local chunk: ((...any) -> ...any)?, problem: string? = loadstring(entry.Source, `={entry:GetFullName()}`)
 if not chunk then
     error(`[Core]: {entry:GetFullName()} didn't compile: {problem}`, 0)

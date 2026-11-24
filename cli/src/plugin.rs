@@ -1,110 +1,73 @@
-use std::env;
-use std::fs;
-use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+mod install;
 
-const PLUGIN: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/plugin.rbxm"));
+pub use install::{install, uninstall};
 
-/// Named apart from a copy built by hand, so uninstalling only ever removes what this CLI wrote
-const FILE_NAME: &str = "LitmusManagedPlugin.rbxm";
+use crate::manifest::Manifest;
+use crate::server::{Mismatch, Outcome, Server, Timeouts};
+use serde_json::Value;
 
-pub fn install() -> Result<(), String> {
-    let file = install_into(&plugins_folder()?)?;
-    println!("litmus: installed the plugin at {}", file.display());
+const MAX_FILES_LISTED: usize = 10;
 
-    Ok(())
-}
+pub fn run(manifest: &Manifest) -> Result<Value, String> {
+    let server = Server::open()?;
+    eprintln!("litmus: waiting for Studio on port {}", server.port());
 
-pub fn uninstall() -> Result<(), String> {
-    let folder = plugins_folder()?;
+    let outcome = server.offer_run(manifest, Timeouts::default(), |place| {
+        eprintln!("litmus: running in {place}");
+    })?;
 
-    if uninstall_from(&folder)? {
-        println!("litmus: removed the plugin from {}", folder.display());
-    } else {
-        println!("litmus: the plugin isn't installed in {}", folder.display());
-    }
-
-    Ok(())
-}
-
-/// Where the plugin was written, replacing any copy installed before
-fn install_into(folder: &Path) -> Result<PathBuf, String> {
-    // Studio only makes the folder once its Plugins Folder button is first pressed
-    fs::create_dir_all(folder).map_err(|error| format!("couldn't create {}: {error}", folder.display()))?;
-
-    let file = folder.join(FILE_NAME);
-    fs::write(&file, PLUGIN).map_err(|error| format!("couldn't write {}: {error}", file.display()))?;
-
-    Ok(file)
-}
-
-/// Whether there was a plugin to remove
-fn uninstall_from(folder: &Path) -> Result<bool, String> {
-    let file = folder.join(FILE_NAME);
-
-    match fs::remove_file(&file) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(format!("couldn't remove {}: {error}", file.display())),
+    match outcome {
+        Outcome::Results(results) => Ok(results),
+        Outcome::Failed { place, message } => Err(format!("{place} couldn't run the tests: {message}")),
+        Outcome::Abandoned { place } => Err(format!("{place} took the run and never reported back")),
+        Outcome::Unclaimed(mismatches) => Err(unclaimed(&mismatches)),
     }
 }
 
-#[cfg(target_os = "windows")]
-fn plugins_folder() -> Result<PathBuf, String> {
-    let local = env::var_os("LOCALAPPDATA")
-        .ok_or("couldn't find Studio's plugins folder, since LOCALAPPDATA isn't set")?;
+fn unclaimed(mismatches: &[Mismatch]) -> String {
+    if mismatches.is_empty() {
+        return "no open place holds this project; open it in Studio and switch the Litmus plugin on".to_owned();
+    }
 
-    Ok(PathBuf::from(local).join("Roblox").join("Plugins"))
-}
+    let mut lines = vec!["no open place matches the code on disk; is rojo serving?".to_owned()];
 
-#[cfg(target_os = "macos")]
-fn plugins_folder() -> Result<PathBuf, String> {
-    let home = env::var_os("HOME").ok_or("couldn't find Studio's plugins folder, since HOME isn't set")?;
+    for mismatch in mismatches {
+        lines.push(format!(
+            "  {}: {} differ, {} missing",
+            mismatch.place,
+            mismatch.differing.len(),
+            mismatch.missing.len()
+        ));
 
-    Ok(PathBuf::from(home).join("Documents").join("Roblox").join("Plugins"))
-}
+        let paths = mismatch.differing.iter().chain(&mismatch.missing);
+        for path in paths.clone().take(MAX_FILES_LISTED) {
+            lines.push(format!("    {}", path.join(".")));
+        }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-fn plugins_folder() -> Result<PathBuf, String> {
-    Err("Roblox Studio only runs on Windows and macOS, so there is nowhere to put its plugin".to_owned())
+        let unlisted = paths.count().saturating_sub(MAX_FILES_LISTED);
+        if unlisted > 0 {
+            lines.push(format!("    and {unlisted} more"));
+        }
+    }
+
+    lines.join("\n")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn folder(name: &str) -> PathBuf {
-        env::temp_dir().join(format!("litmus-{}-{name}", std::process::id())).join("Plugins")
-    }
-
     #[test]
-    fn carries_a_binary_model() {
-        assert!(PLUGIN.starts_with(b"<roblox!"));
-    }
+    fn names_the_files_a_stale_place_is_behind_on() {
+        let mismatches: Vec<Mismatch> = serde_json::from_str(
+            r#"[{ "place": "Stale", "missing": [["ReplicatedStorage", "Gone"]], "differing": [["ReplicatedStorage", "Thing.spec"]] }]"#,
+        )
+        .unwrap();
 
-    #[test]
-    fn installs_into_a_folder_that_is_not_there_yet() {
-        let folder = folder("installs");
-        let file = install_into(&folder).unwrap();
-        let written = fs::read(&file).unwrap();
-        fs::remove_dir_all(folder.parent().unwrap()).unwrap();
+        let text = unclaimed(&mismatches);
 
-        assert_eq!(file, folder.join(FILE_NAME));
-        assert!(written == PLUGIN);
-    }
-
-    #[test]
-    fn uninstalls_only_what_is_installed() {
-        let folder = folder("uninstalls");
-        install_into(&folder).unwrap();
-
-        let first = uninstall_from(&folder);
-        let second = uninstall_from(&folder);
-        let left = folder.join(FILE_NAME).exists();
-        fs::remove_dir_all(folder.parent().unwrap()).unwrap();
-
-        assert_eq!(first, Ok(true));
-        assert_eq!(second, Ok(false));
-        assert!(!left);
+        assert!(text.contains("  Stale: 1 differ, 1 missing\n"), "{text}");
+        assert!(text.contains("    ReplicatedStorage.Thing.spec\n    ReplicatedStorage.Gone"), "{text}");
+        assert!(unclaimed(&[]).contains("no open place holds this project"));
     }
 }

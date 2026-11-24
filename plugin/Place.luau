@@ -7,8 +7,8 @@ export type Comparison = {
     differing: { bridge.Path },
 }
 
-local function descend(root: Instance, path: bridge.Path): Instance?
-    local current: Instance? = root
+local function find(path: bridge.Path): Instance?
+    local current: Instance? = game
 
     for _, name in path do
         if not current then
@@ -31,8 +31,7 @@ local function sourceOf(instance: Instance): string?
     return nil
 end
 
--- Carriage returns are left out, as the CLI leaves them out of the file's hash
-local function hash(source: string): string
+local function hashWithoutCarriageReturns(source: string): string
     local normalized: string = string.gsub(source, "\r", "")
     local digest: buffer = encodingService:ComputeBufferHash(buffer.fromstring(normalized), Enum.HashAlgorithm.Sha256)
 
@@ -46,16 +45,11 @@ end
 
 local place = {}
 
-function place.find(path: bridge.Path): Instance?
-    return descend(game, path)
-end
-
--- The instances at `paths`, leaving out any this place doesn't have
 function place.findAll(paths: { bridge.Path }): { Instance }
     local found: { Instance } = {}
 
     for _, path in paths do
-        local instance: Instance? = place.find(path)
+        local instance: Instance? = find(path)
         if instance then
             table.insert(found, instance)
         end
@@ -64,25 +58,23 @@ function place.findAll(paths: { bridge.Path }): { Instance }
     return found
 end
 
--- The source of the script at `path`, if this place has one there
 function place.sourceAt(path: bridge.Path): string?
-    local instance: Instance? = place.find(path)
+    local instance: Instance? = find(path)
     return instance and sourceOf(instance)
 end
 
--- How this place's scripts differ from the files the CLI hashed on disk
 function place.compare(files: { bridge.File }): Comparison
     local comparison: Comparison = { missing = {}, differing = {} }
 
     for _, file in files do
-        local instance: Instance? = place.find(file.path)
+        local instance: Instance? = find(file.path)
         if not instance then
             table.insert(comparison.missing, file.path)
             continue
         end
 
         local source: string? = sourceOf(instance)
-        if not source or hash(source) ~= file.hash then
+        if not source or hashWithoutCarriageReturns(source) ~= file.hash then
             table.insert(comparison.differing, file.path)
         end
     end

@@ -2,7 +2,6 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-// Builds the Studio plugin into the file `litmus plugin install` writes out, so a CLI always carries its own plugin
 fn main() {
     println!("cargo:rerun-if-changed=../plugin");
     println!("cargo:rerun-if-changed=../plugin.project.json");

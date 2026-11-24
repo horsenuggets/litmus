@@ -1,10 +1,6 @@
 local flux = require("../Packages/Flux")
 local theme = require("./Theme")
 
-local WHITE: Color3 = Color3.fromRGB(255, 255, 255)
-
--- On a dark background a gradient's top is lightened towards white. On a light one that only washes it out, so
--- the top is made more vivid and the bottom deeper, as multiples of the colour's own brightness
 local DARK_THEME_LIGHTENING: number = 0.35
 local LIGHT_THEME_TOP_BRIGHTNESS: number = 1.4
 local LIGHT_THEME_BOTTOM_BRIGHTNESS: number = 0.75
@@ -14,7 +10,6 @@ local function brightened(color: Color3, factor: number): Color3
     return Color3.fromHSV(hue, saturation, math.min(value * factor, 1))
 end
 
--- The interface's colours as one of Studio's themes gives them, following `studioTheme` if it changes
 local function studioColors(scope: flux.Scope, studioTheme: flux.UsedAs<StudioTheme>): theme.Colors
     local isDark: flux.Computed<boolean> = scope:computed(function(use: flux.Use): boolean
         return use(studioTheme).Name == "Dark"
@@ -26,7 +21,6 @@ local function studioColors(scope: flux.Scope, studioTheme: flux.UsedAs<StudioTh
         end)
     end
 
-    -- Studio has no colours for a test's outcome, so each is picked to read on its background
     local function byTheme(dark: string, light: string): flux.Computed<Color3>
         return scope:computed(function(use: flux.Use): Color3
             return Color3.fromHex(if use(isDark) then dark else light)
@@ -38,7 +32,7 @@ local function studioColors(scope: flux.Scope, studioTheme: flux.UsedAs<StudioTh
             local middle: Color3 = use(base)
 
             if use(isDark) then
-                return ColorSequence.new(middle:Lerp(WHITE, DARK_THEME_LIGHTENING), middle)
+                return ColorSequence.new(middle:Lerp(theme.white, DARK_THEME_LIGHTENING), middle)
             end
 
             return ColorSequence.new(

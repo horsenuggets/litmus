@@ -1,5 +1,7 @@
 use crate::manifest::InstancePath;
+use crate::piece::Piece;
 use serde::Deserialize;
+use std::collections::BTreeSet;
 
 #[derive(Deserialize)]
 pub struct Failure {
@@ -20,20 +22,30 @@ pub struct SpecResult {
     pub path: InstancePath,
     pub tests: Vec<TestResult>,
 
-    /// Set when the spec itself didn't load, in which case none of its tests ran
     pub failure: Option<Failure>,
 }
 
 #[derive(Deserialize)]
 pub struct Run {
     pub specs: Vec<SpecResult>,
-    pub appendix: Option<String>,
+    pub appendix: Option<Vec<Piece>>,
     pub failure: Option<String>,
 }
 
 impl Run {
     pub fn passed(&self) -> bool {
         self.failure.is_none() && Tally::of(&self.specs).passed()
+    }
+
+    pub fn failing_sources(&self) -> BTreeSet<&InstancePath> {
+        self.specs
+            .iter()
+            .flat_map(|spec| {
+                let tests = spec.failed_tests().map(|(_, failure)| failure);
+                spec.failure.iter().chain(tests)
+            })
+            .map(|failure| &failure.source)
+            .collect()
     }
 }
 
@@ -122,8 +134,31 @@ mod tests {
         let run = |rest: &str| serde_json::from_str::<Run>(&format!(r#"{{ "specs": {specs}{rest} }}"#)).unwrap();
 
         assert!(run("").passed());
-        assert!(run(r#", "appendix": "text""#).passed());
+        assert!(run(r#", "appendix": [{ "kind": "heading", "text": "Lines run" }]"#).passed());
         assert!(!run(r#", "failure": "too little ran""#).passed());
+    }
+
+    #[test]
+    fn names_each_file_a_failure_points_at_once() {
+        let failure = |source: &str| format!(r#"{{ "message": "m", "source": ["tests", "{source}"], "line": 1 }}"#);
+        let run: Run = serde_json::from_str(&format!(
+            r#"{{ "specs": [
+                {{ "path": ["tests", "a.spec.luau"], "tests": [
+                    {{ "name": "one", "groups": [] }},
+                    {{ "name": "two", "groups": [], "failure": {} }},
+                    {{ "name": "three", "groups": [], "failure": {} }}
+                ] }},
+                {{ "path": ["tests", "b.spec.luau"], "tests": [], "failure": {} }}
+            ] }}"#,
+            failure("a.spec.luau"),
+            failure("helper.luau"),
+            failure("b.spec.luau"),
+        ))
+        .unwrap();
+
+        let named: Vec<String> = run.failing_sources().into_iter().map(|path| path.join("/")).collect();
+
+        assert_eq!(named, ["tests/a.spec.luau", "tests/b.spec.luau", "tests/helper.luau"]);
     }
 
     #[test]

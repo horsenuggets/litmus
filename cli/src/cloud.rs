@@ -3,7 +3,7 @@ mod place;
 
 use crate::luau;
 use crate::manifest::Manifest;
-use client::{Client, Progress};
+use client::{Client, TaskState};
 use serde::Deserialize;
 use serde_json::Value;
 use std::env;
@@ -19,38 +19,32 @@ const TASK: &str = include_str!("cloud/task.luau");
 
 const POLL: Duration = Duration::from_secs(1);
 
-/// Open Cloud stops a task five minutes in, so one unfinished after this long never left the queue
 const PATIENCE: Duration = Duration::from_secs(360);
 
-/// Where a cloud run happens: each run saves a new version of the place, so it should be one kept for testing
 #[derive(Deserialize, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct Place {
+pub struct Target {
     pub universe: u64,
     pub place: u64,
     pub build: Option<PathBuf>,
 }
 
-/// Runs the project's specs in a version of the place saved for this run, and returns the results as the lib wrote them
-pub fn run(project_dir: &Path, manifest: &Manifest, place: &Place, rojo_project: Option<&Path>) -> Result<Value, String> {
+pub fn run(project_dir: &Path, manifest: &Manifest, target: &Target, rojo_project: Option<&Path>) -> Result<Value, String> {
     let client = Client::new(key(project_dir)?);
 
-    let file = match &place.build {
-        // Taken at its word: nothing checks that it holds the code on disk, as the hashes do for a place in Studio
+    let file = match &target.build {
         Some(build) => place::read(&project_dir.join(build))?,
         None => place::build(project_dir, rojo_project)?,
     };
 
-    let version = client.upload(place, &file)?;
-    eprintln!("litmus: running in version {version} of place {}", place.place);
+    let version = client.upload(target, &file)?;
+    eprintln!("litmus: running in version {version} of place {}", target.place);
 
-    let task = client.start(place, version, &script(manifest)?)?;
+    let task = client.start(target, version, &script(manifest)?)?;
     results(&wait(&client, &task)?)
 }
 
-/// The environment's key, or else the one in the project's `.env`, where a developer keeps it between terminals
 fn key(project_dir: &Path) -> Result<String, String> {
-    // A workflow whose secret is missing sets the variable to nothing, which is no key either
     let set = env::var(KEY_VARIABLE).ok().filter(|key| !key.is_empty());
 
     set.or_else(|| key_in(&fs::read_to_string(project_dir.join(DOTENV)).ok()?))
@@ -71,27 +65,24 @@ fn key_in(dotenv: &str) -> Option<String> {
         .filter(|key| !key.is_empty())
 }
 
-/// The task's script: `task.luau`, called with the specs to run
 fn script(manifest: &Manifest) -> Result<String, String> {
     let specs = serde_json::to_string(&manifest.specs())
         .map_err(|error| format!("couldn't write the list of specs: {error}"))?;
 
-    // The file starts on the first line, so a line number in an error is a line of the file
     Ok(format!("return (function(...) {TASK}\nend)({})", luau::string(&specs)))
 }
 
-/// What the task's script returned, once it has
 fn wait(client: &Client, task: &str) -> Result<Vec<Value>, String> {
     let deadline = Instant::now() + PATIENCE;
 
     loop {
         match client.progress(task)? {
-            Progress::Complete(returned) => return Ok(returned),
-            Progress::Failed(reason) => return Err(format!("the task failed: {reason}")),
-            Progress::Running if Instant::now() >= deadline => {
+            TaskState::Complete(returned) => return Ok(returned),
+            TaskState::Failed(reason) => return Err(format!("the task failed: {reason}")),
+            TaskState::Running if Instant::now() >= deadline => {
                 return Err("the task never finished".to_owned());
             }
-            Progress::Running => thread::sleep(POLL),
+            TaskState::Running => thread::sleep(POLL),
         }
     }
 }

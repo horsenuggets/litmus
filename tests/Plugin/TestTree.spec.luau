@@ -15,14 +15,13 @@ local function failing(name: string, groups: { string }): outcome.TestResult
     return { name = name, groups = groups, failure = FAILURE }
 end
 
--- A group's entries in order: a test as its name, and a group as its name with its own entries under it
 local function outline(group: testTree.Group): { any }
     local lines: { any } = {}
 
     for index, entry in group.entries do
-        if entry.test then
+        if entry.kind == "test" then
             lines[index] = entry.test.name
-        elseif entry.group then
+        else
             lines[index] = { group = entry.group.name, entries = outline(entry.group) }
         end
     end

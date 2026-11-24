@@ -1,6 +1,3 @@
--- Everything specific to Roblox lives here, so running elsewhere means swapping this one file
--- Requires nothing, so an entry point can load this alone before any session exists
-
 local SPEC_SUFFIX: string = ".spec"
 
 local function resolvePath(from: ModuleScript, path: string): Instance?
@@ -38,7 +35,6 @@ local function addIfSpec(specs: { ModuleScript }, instance: Instance): ()
         return
     end
 
-    -- One root can sit inside another, and a spec under both still runs once
     if not table.find(specs, instance) then
         table.insert(specs, instance)
     end
@@ -46,12 +42,10 @@ end
 
 local roblox = {}
 
--- What a module's chunk runs under, and so what errors and tracebacks call it
-function roblox.name(module: ModuleScript): string
+function roblox.chunkName(module: ModuleScript): string
     return module:GetFullName()
 end
 
--- The names leading to a module from the top of the place, kept apart since a name can hold dots of its own
 function roblox.path(module: ModuleScript): { string }
     local names: { string } = {}
     local current: Instance? = module
@@ -80,8 +74,7 @@ function roblox.resolve(from: ModuleScript, target: unknown): ModuleScript
 end
 
 function roblox.load(module: ModuleScript, globals: { [string]: any }): (...any) -> ...any
-    -- The "=" makes errors and tracebacks print the name bare, as they do for a real script
-    local chunk: ((...any) -> ...any)?, problem: string? = loadstring(module.Source, `={roblox.name(module)}`)
+    local chunk: ((...any) -> ...any)?, problem: string? = loadstring(module.Source, `={roblox.chunkName(module)}`)
     if not chunk then
         error(problem, 0)
     end
@@ -127,7 +120,7 @@ function roblox.adapter(session: any, specs: { ModuleScript }): any
         specs = listed,
 
         locate = function(chunk: string): { string }?
-            local module: ModuleScript? = session:named(chunk)
+            local module: ModuleScript? = session:moduleOf(chunk)
             return if module then roblox.path(module) else nil
         end,
 
@@ -137,7 +130,6 @@ function roblox.adapter(session: any, specs: { ModuleScript }): any
     }
 end
 
--- The way in: a script outside the lib loads this module alone, then hands it the lib to run through
 function roblox.run(lib: ModuleScript, roots: { Instance }): any
     local loaderModule: Instance? = lib:FindFirstChild("Loader")
     if not loaderModule or not loaderModule:IsA("ModuleScript") then

@@ -38,8 +38,8 @@ local function encode(value: any): string
     return `\{{table.concat(parts, ",")}}`
 end
 
-local function report(event: any): ()
+local function observe(event: any): ()
     print(progressMarker .. encode(event))
 end
 
-print(marker .. encode(litmus.run(adapter(options), report)))
+print(marker .. encode(litmus.run(adapter(options), observe)))

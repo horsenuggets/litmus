@@ -8,13 +8,11 @@ export type Props = {
 
     richText: boolean?,
 
-    -- Takes whatever width its row has left and cuts off what doesn't fit, where it would otherwise be as wide as its text
     truncated: boolean?,
 
     layoutOrder: number?,
 }
 
--- One line of text, sized to itself; Flux starts a label scaled and filling its parent, which a row of text never wants
 local function label(scope: flux.Scope, props: Props): TextLabel
     local truncated: boolean = props.truncated == true
 

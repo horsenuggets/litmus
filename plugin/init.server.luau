@@ -2,53 +2,46 @@ local runService = game:GetService("RunService")
 
 local control = require("@self/Interface/Control")
 local flux = require("@self/Packages/Flux")
+local harness = require("@self/Harness")
 local imageIds = require("@self/ImageIds")
 local outcome = require("@self/Outcome")
 local place = require("@self/Place")
 local results = require("@self/Interface/Results")
-local run = require("@self/Run")
 local sources = require("@self/Interface/Sources")
 local studioColors = require("@self/Interface/StudioColors")
 local theme = require("@self/Interface/Theme")
 local watcher = require("@self/Watcher")
 
--- Which button a run was started from, which the results window's title says
-type Source = "Test" | "CLI"
+type Origin = "Test" | "CLI" | "Standalone"
 
--- What the results window is showing
 type Shown = {
-    source: Source,
+    origin: Origin,
     ran: outcome.Run,
+    sourceAt: sources.Reader,
 }
 
--- The latest run carried out for a CLI, and whether it has been opened since
 type CliRun = {
-    ran: outcome.Run,
+    arrived: watcher.Arrival,
     seen: boolean,
 }
 
--- Kept under its first name, from when the toolbar button was what switched this
-local CONNECTED_SETTING: string = "Enabled"
+local CONNECTED_SETTING: string = "Connected"
 
-local NOTHING_RAN: outcome.Run = { kind = "results", results = {} }
+local NOTHING_RAN: outcome.Run = { kind = "results", specs = {} }
 
--- A play test starts its own copy of every plugin, and the test place holds a copy of this script as well; only
--- the copy editing the place should do anything, so nothing a plugin alone may use comes before this
-if not runService:IsEdit() then
+local isTheCopyEditingThePlace: boolean = runService:IsEdit()
+if not isTheCopyEditingThePlace then
     return
 end
 
 local studio: Studio = settings().Studio
 
--- Docked beside Rojo's window by default, and the same size, so the two can share a slot
 local controlWindowInfo: DockWidgetPluginGuiInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 320, 210, 300, 210)
 
--- Always starts shut, since it has nothing to show until a run happens
 local resultsWindowInfo: DockWidgetPluginGuiInfo = DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Float, false, true, 560, 640, 360, 300)
 
--- `icon` is drawn to show on a dark toolbar, and `darkIcon` on a light one
 local function themedIcon(): string
-    return if studio.Theme.Name == "Dark" then imageIds.icon else imageIds.darkIcon
+    return if studio.Theme.Name == "Dark" then imageIds.logoOnDark else imageIds.logoOnLight
 end
 
 local function window(id: string, title: string, info: DockWidgetPluginGuiInfo): DockWidgetPluginGui
@@ -71,35 +64,45 @@ local scope: flux.Scope = flux.scope()
 
 local studioTheme: flux.Value<StudioTheme> = scope:value(studio.Theme)
 theme.provide(scope, studioColors(scope, studioTheme))
-sources.provide(scope, place.sourceAt)
 
 studio.ThemeChanged:Connect(function(): ()
     studioTheme:set(studio.Theme)
     button.Icon = themedIcon()
 end)
 
--- Whether this place answers `litmus test`; this holds whether or not the control window is showing
 local connected: flux.Value<boolean> = scope:value(plugin:GetSetting(CONNECTED_SETTING) == true)
 
 local shown: flux.Value<Shown?> = scope:value(nil :: Shown?)
 local cliRun: flux.Value<CliRun?> = scope:value(nil :: CliRun?)
 
-local function show(source: Source, ran: outcome.Run): ()
-    shown:set({ source = source, ran = ran })
+sources.provide(scope, function(path: outcome.Path): string?
+    local showing: Shown? = flux.peek(shown)
+    return if showing then showing.sourceAt(path) else nil
+end)
 
-    resultsWindow.Title = `Litmus: {source}`
+local function show(showing: Shown): ()
+    shown:set(showing)
+
+    resultsWindow.Title = `Litmus: {showing.origin}`
     resultsWindow.Enabled = true
 end
 
-local function cliRan(ran: outcome.Run): ()
+local function showArrival(arrived: watcher.Arrival): ()
+    show({
+        origin = arrived.origin,
+        ran = arrived.ran,
+        sourceAt = arrived.sourceAt,
+    })
+end
+
+local function cliRan(arrived: watcher.Arrival): ()
     local showing: Shown? = flux.peek(shown)
 
-    -- A window already open on the CLI's results takes the new ones at once, which leaves nothing unseen
-    local seen: boolean = resultsWindow.Enabled and showing ~= nil and showing.source == "CLI"
-    cliRun:set({ ran = ran, seen = seen })
+    local seen: boolean = resultsWindow.Enabled and showing ~= nil and showing.origin ~= "Test"
+    cliRun:set({ arrived = arrived, seen = seen })
 
     if seen then
-        show("CLI", ran)
+        showArrival(arrived)
     end
 end
 
@@ -110,7 +113,7 @@ control(scope, {
     end,
 
     testActivated = function(): ()
-        show("Test", run.all())
+        show({ origin = "Test", ran = harness.all(), sourceAt = place.sourceAt })
     end,
 
     cliResults = scope:computed(function(use: flux.Use): control.CliResults
@@ -128,8 +131,8 @@ control(scope, {
             return
         end
 
-        cliRun:set({ ran = latest.ran, seen = true })
-        show("CLI", latest.ran)
+        cliRun:set({ arrived = latest.arrived, seen = true })
+        showArrival(latest.arrived)
     end,
 }).Parent = controlWindow
 
@@ -140,7 +143,6 @@ results(scope, {
     end),
 }).Parent = resultsWindow
 
--- The one place the checkbox's state takes effect, both when it changes and when the plugin loads
 scope:effect(function(use: flux.Use): ()
     local now: boolean = use(connected)
 
@@ -153,7 +155,6 @@ scope:effect(function(use: flux.Use): ()
     end
 end)
 
--- Studio brings the control window back as it was left, so the button starts from the window and follows it
 button:SetActive(controlWindow.Enabled)
 
 button.Click:Connect(function(): ()

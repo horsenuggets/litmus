@@ -1,13 +1,12 @@
+use crate::rojo;
 use crate::selection::Selection;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const SPEC_SUFFIX: &str = ".spec";
 
-/// The names leading from `game` to an instance; names can hold dots, so they are never joined on the wire
 pub type InstancePath = Vec<String>;
 
 #[derive(Deserialize)]
@@ -26,12 +25,10 @@ pub struct Script {
     pub path: InstancePath,
     pub hash: String,
 
-    /// Where the script is on disk, relative to the project; kept here and not sent to the plugin
     #[serde(skip)]
     pub file: PathBuf,
 }
 
-/// Every script the project puts in the place, with what its source must hash to
 #[derive(Debug)]
 pub struct Manifest {
     pub project: String,
@@ -40,19 +37,9 @@ pub struct Manifest {
 
 impl Manifest {
     pub fn read(project_dir: &Path, rojo_project: Option<&Path>) -> Result<Manifest, String> {
-        let output = Command::new("rojo")
-            .arg("sourcemap")
-            .args(rojo_project)
-            .current_dir(project_dir)
-            .output()
-            .map_err(|error| format!("couldn't run rojo: {error}"))?;
+        let sourcemap = rojo::run(project_dir, "sourcemap", rojo_project, &[])?;
 
-        if !output.status.success() {
-            let reason = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("rojo sourcemap failed: {}", reason.trim()));
-        }
-
-        Manifest::from_sourcemap(&output.stdout, project_dir)
+        Manifest::from_sourcemap(&sourcemap, project_dir)
     }
 
     fn from_sourcemap(sourcemap: &[u8], project_dir: &Path) -> Result<Manifest, String> {
@@ -125,7 +112,7 @@ fn collect(
 
             scripts.push(Script {
                 path: path.clone(),
-                hash: hash(&source),
+                hash: hash_without_carriage_returns(&source),
                 file: file.clone(),
             });
         }
@@ -142,8 +129,7 @@ fn is_luau(file: &Path) -> bool {
         .is_some_and(|extension| extension == "luau" || extension == "lua")
 }
 
-/// Carriage returns are left out, so a checkout with CRLF endings hashes the same as the place's copy
-fn hash(source: &[u8]) -> String {
+fn hash_without_carriage_returns(source: &[u8]) -> String {
     let normalized: Vec<u8> = source.iter().copied().filter(|byte| *byte != b'\r').collect();
 
     Sha256::digest(&normalized)
@@ -155,6 +141,7 @@ fn hash(source: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::TempProject;
 
     const SOURCEMAP: &str = r#"{
         "name": "demo",
@@ -171,19 +158,20 @@ mod tests {
         }]
     }"#;
 
-    fn project(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("litmus-{}-{name}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("Thing.luau"), "return 1\r\n").unwrap();
-        fs::write(dir.join("Thing.spec.luau"), "return 1\n").unwrap();
-        fs::write(dir.join("Data.json"), "{}").unwrap();
+    fn project(name: &str) -> TempProject {
+        let dir = TempProject::new(name);
+
+        dir.write("Thing.luau", "return 1\r\n");
+        dir.write("Thing.spec.luau", "return 1\n");
+        dir.write("Data.json", "{}");
+
         dir
     }
 
     #[test]
     fn hashes_as_sha256_in_hex() {
         assert_eq!(
-            hash(b"abc"),
+            hash_without_carriage_returns(b"abc"),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
     }
@@ -192,7 +180,6 @@ mod tests {
     fn lists_luau_files_by_instance_path() {
         let dir = project("lists");
         let manifest = Manifest::from_sourcemap(SOURCEMAP.as_bytes(), &dir).unwrap();
-        fs::remove_dir_all(&dir).unwrap();
 
         let paths: Vec<String> = manifest.scripts.iter().map(|script| script.path.join("/")).collect();
 
@@ -205,7 +192,6 @@ mod tests {
     fn narrows_to_the_specs_a_selection_names_and_keeps_every_other_script() {
         let dir = project("narrows");
         let mut manifest = Manifest::from_sourcemap(SOURCEMAP.as_bytes(), &dir).unwrap();
-        fs::remove_dir_all(&dir).unwrap();
 
         let nowhere = Selection::of(&["Other.spec.luau".to_owned()]).unwrap();
         assert!(manifest.narrow(&nowhere).is_err());
@@ -223,7 +209,6 @@ mod tests {
     fn ignores_line_endings() {
         let dir = project("endings");
         let manifest = Manifest::from_sourcemap(SOURCEMAP.as_bytes(), &dir).unwrap();
-        fs::remove_dir_all(&dir).unwrap();
 
         assert_eq!(manifest.scripts[0].hash, manifest.scripts[1].hash);
     }

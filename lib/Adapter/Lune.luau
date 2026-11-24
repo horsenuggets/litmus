@@ -33,7 +33,7 @@ local function withoutExtension(file: string): string
     return file
 end
 
-local function placeOf(file: string): { string }
+local function namesOf(file: string): { string }
     local names: { string } = string.split(withoutExtension(file), "/")
     if names[#names] == "init" then
         table.remove(names)
@@ -42,20 +42,20 @@ local function placeOf(file: string): { string }
     return names
 end
 
-local function step(place: { string }, name: string): ()
+local function step(names: { string }, name: string): ()
     if name == "." or name == "" then
         return
     end
 
-    if name ~= ".." or #place == 0 or place[#place] == ".." then
-        table.insert(place, name)
+    if name ~= ".." or #names == 0 or names[#names] == ".." then
+        table.insert(names, name)
     else
-        table.remove(place)
+        table.remove(names)
     end
 end
 
-local function fileAt(place: { string }): string?
-    local path: string = table.concat(place, "/")
+local function fileAt(names: { string }): string?
+    local path: string = table.concat(names, "/")
 
     for _, extension in EXTENSIONS do
         if path ~= "" and fs.isFile(path .. extension) then
@@ -78,8 +78,8 @@ local function resolve(from: string, target: unknown): string
         error(`[Litmus]: can't require {tostring(target)}: a path is a string`, 0)
     end
 
-    local names: { string } = string.split(target, "/")
-    local root: string = table.remove(names, 1) :: string
+    local parts: { string } = string.split(target, "/")
+    local root: string = table.remove(parts, 1) :: string
 
     local climbs: number? = CLIMBS[root]
     if not climbs and isAlias(root) then
@@ -90,16 +90,16 @@ local function resolve(from: string, target: unknown): string
         error(`[Litmus]: can't require "{target}": "{root}" leads nowhere; a path starts with ./, ../, @self or an alias`, 0)
     end
 
-    local place: { string } = placeOf(from)
+    local names: { string } = namesOf(from)
     for _ = 1, climbs do
-        step(place, "..")
+        step(names, "..")
     end
 
-    for _, name in names do
-        step(place, name)
+    for _, part in parts do
+        step(names, part)
     end
 
-    local file: string? = fileAt(place)
+    local file: string? = fileAt(names)
     if not file then
         error(`[Litmus]: can't require "{target}": there is no module at that path`, 0)
     end
@@ -107,13 +107,13 @@ local function resolve(from: string, target: unknown): string
     return file
 end
 
-local function inLib(lib: string, module: string): string?
+local function libPathOf(lib: string, module: string): string?
     local prefix: string = `{lib}/`
     if string.sub(module, 1, #prefix) ~= prefix then
         return nil
     end
 
-    return `../{table.concat(placeOf(string.sub(module, #prefix + 1)), "/")}`
+    return `../{table.concat(namesOf(string.sub(module, #prefix + 1)), "/")}`
 end
 
 local function loadedByRuntime(path: string): (...any) -> ...any
@@ -134,7 +134,7 @@ local function load(lib: string, module: string, globals: { [string]: any }): (.
         return loadedByRuntime(module)
     end
 
-    local own: string? = inLib(lib, module)
+    local own: string? = libPathOf(lib, module)
     if own then
         return loadedByRuntime(own)
     end
@@ -154,7 +154,7 @@ end
 
 local function lune(options: Options): runner.Adapter
     local session: loader.Class = loader.new({
-        name = function(module: string): string
+        chunkName = function(module: string): string
             return module
         end,
 
@@ -179,7 +179,7 @@ local function lune(options: Options): runner.Adapter
         specs = specs,
 
         locate = function(chunk: string): { string }?
-            local module: string? = session:named(chunk)
+            local module: string? = session:moduleOf(chunk)
             return if module then string.split(module, "/") else nil
         end,
 
