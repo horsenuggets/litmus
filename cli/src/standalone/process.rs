@@ -1,8 +1,13 @@
 use super::{FOLDER, MARKER, PROGRESS_MARKER, SCRIPT};
 use crate::progress::{Display, Event};
+use process_wrap::std::CommandWrap;
+#[cfg(windows)]
+use process_wrap::std::JobObject;
+#[cfg(unix)]
+use process_wrap::std::ProcessGroup;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -18,46 +23,53 @@ enum Message {
 }
 
 pub fn run(project_dir: &Path, run: &[String], specs: &[String]) -> Result<String, String> {
+    run_with_budget(project_dir, run, specs, BUDGET)
+}
+
+fn run_with_budget(project_dir: &Path, run: &[String], specs: &[String], budget: Duration) -> Result<String, String> {
     let script = format!("{FOLDER}/{SCRIPT}");
     let shown = format!("{} {script}", run.join(" "));
 
-    let mut child = Command::new(&run[0])
-        .args(&run[1..])
-        .arg(&script)
-        .current_dir(project_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|error| {
-            format!("couldn't start `{shown}`, which begins with what litmus.toml gives as `run` under [standalone]: {error}")
-        })?;
+    let mut command = CommandWrap::with_new(&run[0], |command| {
+        command
+            .args(&run[1..])
+            .arg(&script)
+            .current_dir(project_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped());
+    });
+    #[cfg(unix)]
+    command.wrap(ProcessGroup::leader());
+    #[cfg(windows)]
+    command.wrap(JobObject);
 
-    let Some(output) = child.stdout.take() else {
-        return Err(format!("couldn't read what `{shown}` prints"));
-    };
+    let mut child = command.spawn().map_err(|error| {
+        format!(
+            "couldn't start `{shown}`, which begins with what litmus.toml gives as `run` under [standalone]: {error}"
+        )
+    })?;
+    let output = child.stdout().take().expect("The runtime stdout was piped.");
 
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || relay(BufReader::new(output), |message| sender.send(message).is_ok()));
 
-    let deadline = Instant::now() + BUDGET;
+    let deadline = Instant::now() + budget;
     let mut display = Display::new(specs.to_vec());
 
     let reported = loop {
         match receiver.recv_timeout(TICK) {
             Ok(Message::Printed(line)) => display.print(&line),
             Ok(Message::Event(event)) => display.take(event),
-            Ok(Message::Results(results)) => break Some(results),
+            Ok(Message::Results(results)) => break Ok(Some(results)),
             Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break None,
+            Err(RecvTimeoutError::Disconnected) => break Ok(None),
         }
 
         if Instant::now() >= deadline {
-            display.finish();
-
-            let _ = child.kill();
-            let _ = child.wait();
-
-            return Err(format!("`{shown}` was stopped, still running after {} minutes", BUDGET.as_secs() / 60));
+            break Err(format!(
+                "`{shown}` was stopped, still running after {} seconds",
+                budget.as_secs()
+            ));
         }
 
         display.refresh();
@@ -65,18 +77,39 @@ pub fn run(project_dir: &Path, run: &[String], specs: &[String]) -> Result<Strin
 
     display.finish();
 
-    let Some(reported) = reported else {
-        let status = child
-            .wait()
-            .map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))?;
-
-        return Err(format!("`{shown}` ended without reporting any results ({status})"));
+    #[cfg(unix)]
+    let stop_deadline = Instant::now() + Duration::from_secs(1);
+    let stopped = loop {
+        match child.start_kill() {
+            #[cfg(unix)]
+            Err(error) if error.raw_os_error() == Some(libc::EPERM) && Instant::now() < stop_deadline => {
+                // macOS can reject a signal while a launcher is exiting. Reap it before
+                // retrying, without suppressing a persistent permission error.
+                child
+                    .try_wait()
+                    .map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))?;
+                thread::sleep(TICK);
+            }
+            result => break result,
+        }
     };
+    if let Err(error) = stopped {
+        #[cfg(unix)]
+        let already_gone = error.raw_os_error() == Some(libc::ESRCH);
+        #[cfg(not(unix))]
+        let already_gone = false;
+        if !already_gone {
+            return Err(format!("couldn't stop the process tree for `{shown}`: {error}"));
+        }
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))?;
 
-    let _ = child.kill();
-    let _ = child.wait();
-
-    Ok(reported)
+    match reported? {
+        Some(reported) => Ok(reported),
+        None => Err(format!("`{shown}` ended without reporting any results ({status})")),
+    }
 }
 
 fn relay(mut output: impl BufRead, mut pass: impl FnMut(Message) -> bool) {
@@ -109,7 +142,11 @@ fn read(text: &str) -> Option<Message> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
+    use crate::testing::TempProject;
+    use std::fs;
+    use std::io::{Cursor, Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::process::Command;
 
     fn relayed(output: &str) -> Vec<Message> {
         let mut passed = Vec::new();
@@ -132,7 +169,11 @@ mod tests {
 
         assert_eq!(
             passed,
-            [printed("first"), printed("second"), Message::Results("{\"specs\":[]}".to_owned())]
+            [
+                printed("first"),
+                printed("second"),
+                Message::Results("{\"specs\":[]}".to_owned())
+            ]
         );
     }
 
@@ -145,7 +186,10 @@ mod tests {
 
     #[test]
     fn drops_a_line_of_progress_it_cannot_read() {
-        assert_eq!(relayed("@@litmus-progress@@{\"kind\":\"unheard-of\"}\nprinted\n"), [printed("printed")]);
+        assert_eq!(
+            relayed("@@litmus-progress@@{\"kind\":\"unheard-of\"}\nprinted\n"),
+            [printed("printed")]
+        );
     }
 
     #[test]
@@ -166,11 +210,126 @@ mod tests {
         assert_eq!(passed, 1);
     }
 
+    fn fixture_command(name: &str) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.args(["--exact", name, "--ignored", "--nocapture"]);
+        command
+    }
+
+    #[test]
+    #[ignore = "invoked as a subprocess by process cleanup tests"]
+    fn wrapper_fixture() {
+        let mode = fs::read_to_string("mode").unwrap();
+        let mut command = fixture_command("standalone::process::tests::descendant_fixture");
+        if mode == "missing" {
+            command.stdout(Stdio::null());
+        }
+        let mut child = command.spawn().unwrap();
+        if mode == "missing" {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !Path::new("ready").exists() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+        } else {
+            child.wait().unwrap();
+        }
+    }
+
+    #[test]
+    #[ignore = "invoked as a subprocess by process cleanup tests"]
+    fn descendant_fixture() {
+        let address = fs::read_to_string("address").unwrap();
+        let mode = fs::read_to_string("mode").unwrap();
+        let mut connection = TcpStream::connect(address).unwrap();
+        connection.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        connection.write_all(&[1]).unwrap();
+        fs::write("ready", "").unwrap();
+        if mode == "results" {
+            println!("\n{MARKER}{{\"specs\":[]}}");
+            std::io::stdout().flush().unwrap();
+        }
+        let _ = connection.read(&mut [0]);
+    }
+
+    fn cleaned_up(mode: &str) -> Result<String, String> {
+        let project = TempProject::new(&format!("process-cleanup-{mode}"));
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        project.write("address", &listener.local_addr().unwrap().to_string());
+        project.write("mode", mode);
+        let command = [
+            std::env::current_exe().unwrap().to_str().unwrap().to_owned(),
+            "--exact".to_owned(),
+            "standalone::process::tests::wrapper_fixture".to_owned(),
+            "--ignored".to_owned(),
+            "--nocapture".to_owned(),
+            "--skip".to_owned(),
+        ];
+        let result = run_with_budget(&project, &command, &[], Duration::from_secs(2));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut connection = loop {
+            match listener.accept() {
+                Ok((connection, _)) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("The descendant did not connect ({error}). Runner returned {result:?}."),
+            }
+        };
+        connection.set_nonblocking(false).unwrap();
+        connection.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        connection.read_exact(&mut [0]).unwrap();
+        let read = connection.read(&mut [0]);
+        let closed = match &read {
+            Ok(0) => true,
+            Err(error) => matches!(
+                error.kind(),
+                std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::ConnectionReset
+            ),
+            _ => false,
+        };
+        // Release a surviving fixture before asserting, so a regression does not leak it.
+        if !closed {
+            let _ = connection.write_all(&[0]);
+        }
+        assert!(
+            closed,
+            "The runtime descendant survived the {mode} exit ({read:?}). Runner returned {result:?}."
+        );
+        result
+    }
+
+    #[test]
+    fn reported_results_stop_the_wrapper_and_runtime() {
+        assert_eq!(cleaned_up("results").unwrap(), "{\"specs\":[]}");
+    }
+
+    #[test]
+    fn timeout_stops_the_wrapper_and_runtime() {
+        assert!(
+            cleaned_up("timeout")
+                .unwrap_err()
+                .contains("was stopped, still running")
+        );
+    }
+
+    #[test]
+    fn missing_results_stop_a_runtime_after_its_wrapper_exits() {
+        assert!(
+            cleaned_up("missing")
+                .unwrap_err()
+                .contains("ended without reporting any results")
+        );
+    }
+
     #[test]
     fn a_command_that_cannot_start_is_named() {
         let command = ["litmus-no-such-command".to_owned(), "run".to_owned()];
         let problem = run(Path::new("."), &command, &[]).unwrap_err();
 
-        assert!(problem.contains("`litmus-no-such-command run .litmus/run.luau`"), "{problem}");
+        assert!(
+            problem.contains("`litmus-no-such-command run .litmus/run.luau`"),
+            "{problem}"
+        );
     }
 }
