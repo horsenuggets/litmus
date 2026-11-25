@@ -29,7 +29,7 @@ jobs:
       - name: Run the specs
         run: cli/target/debug/litmus test --standalone
 
-  # A pull request from a fork gets no secrets here, so its cloud run is the one in fork.yml
+  # A pull request from a fork gets no secrets here. To run its cloud specs, push its reviewed head to a branch here and open a pull request from that
   cloud:
     name: Specs in the cloud
     if: github.event.pull_request.head.repo.full_name == github.repository
