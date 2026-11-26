@@ -7,7 +7,7 @@ use process_wrap::std::JobObject;
 use process_wrap::std::ProcessGroup;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -77,6 +77,17 @@ fn run_with_budget(project_dir: &Path, run: &[String], specs: &[String], budget:
 
     display.finish();
 
+    let stopped = stop(&mut child, &shown);
+    let (outcome, warning) = outcome(&shown, reported, stopped);
+    if let Some(warning) = warning {
+        eprintln!("litmus: {warning}");
+    }
+
+    outcome
+}
+
+// Stops the runtime and everything it started, then reaps the launcher.
+fn stop(child: &mut Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Result<ExitStatus, String> {
     #[cfg(unix)]
     let stop_deadline = Instant::now() + Duration::from_secs(1);
     let stopped = loop {
@@ -85,9 +96,7 @@ fn run_with_budget(project_dir: &Path, run: &[String], specs: &[String], budget:
             Err(error) if error.raw_os_error() == Some(libc::EPERM) && Instant::now() < stop_deadline => {
                 // macOS can reject a signal while a launcher is exiting. Reap it before
                 // retrying, without suppressing a persistent permission error.
-                child
-                    .try_wait()
-                    .map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))?;
+                child.try_wait().map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))?;
                 thread::sleep(TICK);
             }
             result => break result,
@@ -99,16 +108,27 @@ fn run_with_budget(project_dir: &Path, run: &[String], specs: &[String], budget:
         #[cfg(not(unix))]
         let already_gone = false;
         if !already_gone {
-            return Err(format!("couldn't stop the process tree for `{shown}`: {error}"));
+            return Err(format!("couldn't stop the process tree for `{shown}`, so it may still be running: {error}"));
         }
     }
-    let status = child
-        .wait()
-        .map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))?;
 
-    match reported? {
-        Some(reported) => Ok(reported),
-        None => Err(format!("`{shown}` ended without reporting any results ({status})")),
+    child.wait().map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))
+}
+
+// What the run comes to. Results the runtime reported still count when stopping it then
+// failed, with a warning, since the tests themselves finished.
+fn outcome(
+    shown: &str,
+    reported: Result<Option<String>, String>,
+    stopped: Result<ExitStatus, String>,
+) -> (Result<String, String>, Option<String>) {
+    match (reported, stopped) {
+        (Ok(Some(results)), Ok(_)) => (Ok(results), None),
+        (Ok(Some(results)), Err(problem)) => (Ok(results), Some(problem)),
+        (Ok(None), Ok(status)) => (Err(format!("`{shown}` ended without reporting any results ({status})")), None),
+        (Ok(None), Err(problem)) => (Err(format!("`{shown}` ended without reporting any results, and {problem}")), None),
+        (Err(timeout), Ok(_)) => (Err(timeout), None),
+        (Err(timeout), Err(problem)) => (Err(format!("{timeout}, and {problem}")), None),
     }
 }
 
@@ -321,6 +341,44 @@ mod tests {
                 .contains("ended without reporting any results")
         );
     }
+
+    fn exited() -> ExitStatus {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
+
+        ExitStatus::from_raw(0)
+    }
+
+    #[test]
+    fn keeps_reported_results_with_a_warning_when_the_runtime_cannot_be_stopped() {
+        let (outcome, warning) = outcome("lune run", Ok(Some("{}".to_owned())), Err("couldn't stop it".to_owned()));
+
+        assert_eq!(outcome, Ok("{}".to_owned()));
+        assert_eq!(warning.as_deref(), Some("couldn't stop it"));
+    }
+
+    #[test]
+    fn reports_results_without_a_warning_when_the_runtime_stopped() {
+        assert_eq!(outcome("lune run", Ok(Some("{}".to_owned())), Ok(exited())), (Ok("{}".to_owned()), None));
+    }
+
+    #[test]
+    fn names_both_problems_when_a_run_timed_out_and_could_not_be_stopped() {
+        let (outcome, warning) = outcome("lune run", Err("it timed out".to_owned()), Err("couldn't stop it".to_owned()));
+
+        assert_eq!(outcome, Err("it timed out, and couldn't stop it".to_owned()));
+        assert_eq!(warning, None);
+    }
+
+    #[test]
+    fn says_a_run_reported_nothing_even_when_it_could_not_be_stopped() {
+        let (outcome, _) = outcome("lune run", Ok(None), Err("couldn't stop it".to_owned()));
+
+        assert_eq!(outcome, Err("`lune run` ended without reporting any results, and couldn't stop it".to_owned()));
+    }
+
 
     #[test]
     fn a_command_that_cannot_start_is_named() {
