@@ -17,6 +17,12 @@ use std::time::{Duration, Instant};
 #[cfg(all(test, windows))]
 mod windows_tests;
 
+#[cfg(target_os = "macos")]
+#[link(name = "proc")]
+unsafe extern "C" {
+    fn proc_listpgrppids(group: libc::pid_t, buffer: *mut std::ffi::c_void, size: libc::c_int) -> libc::c_int;
+}
+
 const BUDGET: Duration = Duration::from_secs(300);
 const CLEANUP_BUDGET: Duration = Duration::from_secs(1);
 const TICK: Duration = Duration::from_millis(100);
@@ -179,7 +185,7 @@ fn run_with_budget(
         let mut owned = child.lock().unwrap();
         owned.stop(&shown)
     };
-    if stopped.is_ok() && reported.is_ok() {
+    if reported.is_ok() {
         let drain_deadline = Instant::now() + Duration::from_secs(1);
         // Collect before replaying logs so output backpressure cannot hide queued results.
         let mut pending = Vec::new();
@@ -234,6 +240,21 @@ fn launcher_exited(child: &mut std::process::Child) -> std::io::Result<bool> {
     child.try_wait().map(|status| status.is_some())
 }
 
+#[cfg(target_os = "macos")]
+fn only_zombie_launcher(launcher: &mut std::process::Child) -> bool {
+    if !matches!(launcher_exited(launcher), Ok(true)) {
+        return false;
+    }
+    // Two slots distinguish the reserved leader from any other group member. Unknown
+    // or truncated observations must not suppress a genuine permission failure.
+    let mut members: [libc::pid_t; 2] = [0; 2];
+    // SAFETY: The buffer is writable and sized in bytes; the leader remains unreaped.
+    let count = unsafe {
+        proc_listpgrppids(launcher.id() as libc::pid_t, members.as_mut_ptr().cast(), std::mem::size_of_val(&members) as libc::c_int)
+    };
+    count == 1 && members[0] == launcher.id() as libc::pid_t
+}
+
 fn stop_owned(mut child: Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Result<ExitStatus, String> {
     let stopped = stop(&mut child, shown);
     // The bounded cleanup already attempted both owners. Never enter the wrapper's
@@ -249,6 +270,13 @@ fn stop(child: &mut Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Re
     #[cfg(unix)]
     let stopped = loop {
         match child.start_kill() {
+            #[cfg(target_os = "macos")]
+            Err(error) if error.raw_os_error() == Some(libc::EPERM) && {
+                // macOS rejects signals to a zombie-only group. Its reserved leader
+                // and an authoritative membership query distinguish that from denial.
+                let launcher = unsafe { child.try_inner_child_mut() }.expect("The command has a native child.");
+                only_zombie_launcher(launcher)
+            } => break Ok(()),
             Err(error) if error.raw_os_error() == Some(libc::EPERM) && Instant::now() < stop_deadline => {
                 // Keep the leader reserved through retries, even if macOS rejects the
                 // signal while it exits. Persistent permission errors remain visible.
@@ -449,6 +477,10 @@ mod tests {
         #[cfg(windows)]
         super::windows_tests::ignore_ctrl_c(true);
         let mode = fs::read_to_string("mode").unwrap();
+        if mode == "natural-backlog-results" {
+            descendant_fixture();
+            return;
+        }
         #[cfg(unix)]
         if matches!(mode.as_str(), "moved-launcher" | "moved-launcher-broken-pipe") {
             let group = fs::read_to_string("parent-group").unwrap().parse::<libc::pid_t>().unwrap();
@@ -499,7 +531,7 @@ mod tests {
             std::io::stdout().flush().unwrap();
         }
         let prints = match mode.as_str() {
-            "backlog-results" | "interrupt-output" => 10_000,
+            "backlog-results" | "interrupt-output" | "natural-backlog-results" => 10_000,
             "blocked-output" | "timeout-output" => 1_000_000,
             "broken-pipe" | "moved-launcher-broken-pipe" => 1,
             _ => 0,
@@ -507,12 +539,14 @@ mod tests {
         for _ in 0..prints {
             println!("The runtime is still running.");
         }
-        if mode == "backlog-results" {
+        if matches!(mode.as_str(), "backlog-results" | "natural-backlog-results") {
             println!("\n{MARKER}{{\"specs\":[]}}");
             std::io::stdout().flush().unwrap();
             fs::write("reported", "").unwrap();
         }
-        let _ = connection.read(&mut [0]);
+        if mode != "natural-backlog-results" {
+            let _ = connection.read(&mut [0]);
+        }
     }
 
     fn wrapper_run() -> Vec<String> {
@@ -610,10 +644,25 @@ mod tests {
             assert!(Instant::now() < deadline, "The launcher did not exit.");
             thread::sleep(Duration::from_millis(10));
         }
+        #[cfg(target_os = "macos")]
+        let only_zombie = only_zombie_launcher(&mut child);
         // A second native wait must still find the zombie, rather than ECHILD.
         let mut status = 0;
         let reaped = unsafe { libc::waitpid(child.id() as libc::pid_t, &mut status, libc::WNOHANG) };
         assert_eq!(reaped, child.id() as libc::pid_t, "Polling reaped the process-group leader early.");
+        #[cfg(target_os = "macos")]
+        assert!(only_zombie, "The reserved zombie must not be mistaken for a live process tree.");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_live_launcher_is_not_a_zombie_only_group() {
+        use std::os::unix::process::CommandExt;
+        let mut child = Command::new("sh").args(["-c", "exec sleep 60"]).process_group(0).spawn().unwrap();
+        let observed = only_zombie_launcher(&mut child);
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(!observed);
     }
 
     #[test]
@@ -722,7 +771,7 @@ mod tests {
             connection.set_nonblocking(false).unwrap();
             connection.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
             connection.read_exact(&mut [0]).unwrap();
-            if signal.is_none() && !matches!(mode, "backlog-results" | "timeout-output") {
+            if signal.is_none() && !matches!(mode, "backlog-results" | "natural-backlog-results" | "timeout-output") {
                 drop(child.stdout.take());
             }
             connection.write_all(&[1]).unwrap();
@@ -779,7 +828,7 @@ mod tests {
                     output.read_to_end(&mut printed).unwrap();
                     printed
                 }))
-            } else if mode == "backlog-results" {
+            } else if matches!(mode, "backlog-results" | "natural-backlog-results") {
                 let reported = project.join("reported");
                 while !reported.exists() && Instant::now() < deadline {
                     thread::sleep(Duration::from_millis(10));
@@ -886,6 +935,11 @@ mod tests {
     #[test]
     fn timeout_stops_the_runtime_even_when_the_output_consumer_stops_reading() {
         termination_case(None, "timeout-output");
+    }
+
+    #[test]
+    fn queued_results_survive_a_natural_exit_without_any_descendants() {
+        termination_case(None, "natural-backlog-results");
     }
 
     #[test]
