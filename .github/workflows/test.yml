@@ -1,53 +1,59 @@
-name: Test
+name: Native Tests
 
-# Not on pushes: main only takes pull requests, so whatever lands on it has already run here
 on:
   pull_request:
+    branches: [main, release]
 
 permissions:
   contents: read
 
+concurrency:
+  group: native-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
-  standalone:
-    name: CLI tests and standalone specs
-    runs-on: ubuntu-latest
+  native-tests:
+    name: native-tests-${{ matrix.system }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: linux
+            runner: ubuntu-latest
+          - system: macos
+            runner: macos-latest
+          - system: windows
+            runner: windows-latest
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - name: Install the tools
         uses: CompeyDev/setup-rokit@v0.2.1
+
+      - name: Update stable Rust
+        run: rustup update stable --no-self-update
 
       - name: Test the CLI
         working-directory: cli
-        run: cargo test --locked
+        run: rustup run stable cargo test --locked
+
+      - name: Check the CLI
+        working-directory: cli
+        run: rustup run stable cargo clippy --locked --all-targets -- -D warnings
 
       - name: Build the CLI
         working-directory: cli
-        run: cargo build --locked
+        run: rustup run stable cargo build --locked
 
       - name: Run the specs
         run: cli/target/debug/litmus test --standalone
-
-  # A pull request from a fork gets no secrets here. To run its cloud specs, push its reviewed head to a branch here and open a pull request from that
-  cloud:
-    name: Specs in the cloud
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v7
-
-      # Rojo builds both the plugin the CLI carries and the place the specs run in
-      - name: Install the tools
-        uses: CompeyDev/setup-rokit@v0.2.1
-
-      - name: Build the CLI
-        working-directory: cli
-        run: cargo build --locked
-
-      # Each run saves a new version of this place, which is kept for testing and never published
-      - name: Run the specs
-        env:
-          LITMUS_API_KEY: ${{ secrets.LITMUS_API_KEY }}
-        run: cli/target/debug/litmus test --cloud

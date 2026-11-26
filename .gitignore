@@ -1,17 +1,27 @@
 # Build files
+.litmus/
 /build.rbxl
-/cli/target
-.litmus
+/cli/target/
+
+# Environment
+.env
+
+# Luau language server
+luau-cache/
 
 # Roblox Studio lock files
-*.rbxlx.lock
 *.rbxl.lock
+*.rbxlx.lock
 
 # Rojo files
 sourcemap.json
 
-# Luau-lsp
-luau-cache
+# Terraform
+.terraform/
+*.tfplan
+*.tfstate
+*.tfstate.*
 
-# Ferry files
-.env
+# Worktrees
+/.worktrees/
+/.wt/

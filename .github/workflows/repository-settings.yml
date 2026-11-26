@@ -1,0 +1,40 @@
+name: Repository Settings
+
+on:
+  pull_request:
+    branches: [main, release]
+
+permissions:
+  contents: read
+
+jobs:
+  check-repository-settings:
+    name: check-repository-settings
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: submodules/hcl4fmt/go.mod
+          cache-dependency-path: submodules/hcl4fmt/go.sum
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.17.2
+
+      - name: Check HCL formatting
+        run: go -C submodules/hcl4fmt run ./src/cmd/hcl4fmt -check -recursive "$PWD/terraform"
+
+      - name: Initialize the provider without deployment state
+        run: terraform -chdir=terraform init -backend=false -lockfile=readonly
+
+      - name: Validate repository settings
+        run: terraform -chdir=terraform validate
+
+      - name: Test repository protections without credentials
+        run: terraform -chdir=terraform test

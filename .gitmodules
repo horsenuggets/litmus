@@ -1,0 +1,3 @@
+[submodule "submodules/hcl4fmt"]
+    path = submodules/hcl4fmt
+    url = git@github.com:horsenuggets/hcl4fmt.git
