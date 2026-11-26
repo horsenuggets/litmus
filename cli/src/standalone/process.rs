@@ -287,13 +287,12 @@ fn stop(child: &mut Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Re
     };
     #[cfg(windows)]
     let stopped = child.start_kill();
-    let tree_problem = stopped.err().and_then(|error| {
+    let tree_problem = match stopped {
+        Ok(()) => None,
         #[cfg(unix)]
-        if error.raw_os_error() == Some(libc::ESRCH) {
-            return None;
-        }
-        Some(format!("couldn't stop the process tree for `{shown}`, so it may still be running: {error}"))
-    });
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => None,
+        Err(error) => Some(format!("couldn't stop the process tree for `{shown}`, so it may still be running: {error}")),
+    };
 
     // A launcher can leave its original group. Its native child remains ours, so
     // terminate it independently before any wait can release its numeric identity.
