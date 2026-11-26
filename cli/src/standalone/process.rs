@@ -119,17 +119,27 @@ fn run_with_budget(
     };
     if stopped.is_ok() {
         let drain_deadline = Instant::now() + Duration::from_secs(1);
-        let mut final_report = None;
+        // Collect before replaying logs so output backpressure cannot hide queued results.
+        let mut pending = Vec::new();
         while Instant::now() < drain_deadline && !interrupt.cancelled() {
             match receiver.recv_timeout(TICK) {
-                Ok(Message::Printed(line)) => display.print(&line),
-                Ok(Message::Event(event)) => display.take(event),
-                Ok(Message::Results(results)) => {
-                    final_report = Some(results);
-                    break;
+                Ok(message) => {
+                    let last = matches!(message, Message::Results(_));
+                    pending.push(message);
+                    if last {
+                        break;
+                    }
                 }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        let mut final_report = None;
+        for message in pending {
+            match message {
+                Message::Printed(line) => display.print(&line),
+                Message::Event(event) => display.take(event),
+                Message::Results(results) => final_report = Some(results),
             }
         }
         display.finish();
@@ -316,9 +326,10 @@ mod tests {
     fn wrapper_fixture() {
         let mode = fs::read_to_string("mode").unwrap();
         let mut child = fixture_command("standalone::process::tests::descendant_fixture").spawn().unwrap();
-        if matches!(mode.as_str(), "escaped" | "missing" | "exited-results") {
+        if matches!(mode.as_str(), "backlog-results" | "escaped" | "missing" | "exited-results") {
             let deadline = Instant::now() + Duration::from_secs(5);
-            while !Path::new("ready").exists() && Instant::now() < deadline {
+            let ready = if mode == "backlog-results" { "reported" } else { "ready" };
+            while !Path::new(ready).exists() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(10));
             }
             if mode == "exited-results" {
@@ -357,13 +368,18 @@ mod tests {
             std::io::stdout().flush().unwrap();
         }
         let prints = match mode.as_str() {
-            "interrupt-output" => 10_000,
+            "backlog-results" | "interrupt-output" => 10_000,
             "blocked-output" => 1_000_000,
             "broken-pipe" => 1,
             _ => 0,
         };
         for _ in 0..prints {
             println!("The runtime is still running.");
+        }
+        if mode == "backlog-results" {
+            println!("\n{MARKER}{{\"specs\":[]}}");
+            std::io::stdout().flush().unwrap();
+            fs::write("reported", "").unwrap();
         }
         let _ = connection.read(&mut [0]);
     }
@@ -521,7 +537,7 @@ mod tests {
             connection.set_nonblocking(false).unwrap();
             connection.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
             connection.read_exact(&mut [0]).unwrap();
-            if signal.is_none() {
+            if signal.is_none() && mode != "backlog-results" {
                 drop(child.stdout.take());
             }
             connection.write_all(&[1]).unwrap();
@@ -553,6 +569,44 @@ mod tests {
             if mode == "interrupt-results" {
                 project.write("report", "");
             }
+            let output = if mode == "backlog-results" {
+                let reported = project.join("reported");
+                while !reported.exists() && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                assert!(reported.exists(), "The runtime did not queue its results.");
+                let mut output = child.stdout.take().unwrap();
+                let mut prefix = Vec::new();
+                connection.set_nonblocking(true).unwrap();
+                let cleanup_deadline = Instant::now() + Duration::from_secs(3);
+                loop {
+                    match connection.read(&mut [0]) {
+                        Ok(0) => break,
+                        Err(error)
+                            if matches!(error.kind(), std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::ConnectionReset) =>
+                        {
+                            break;
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                        result => panic!("The runtime lifetime socket was not idle ({result:?})."),
+                    }
+                    assert!(Instant::now() < cleanup_deadline, "Cleanup did not precede output replay.");
+                    let mut chunk = [0; 4096];
+                    let read = output.read(&mut chunk).unwrap();
+                    prefix.extend_from_slice(&chunk[..read]);
+                    thread::sleep(Duration::from_millis(10));
+                }
+                connection.set_nonblocking(false).unwrap();
+                assert!(prefix.len() < 100_000, "The queued logs must still exceed the downstream pipe capacity.");
+                // Keep the downstream pipe stalled beyond the result-collection window.
+                thread::sleep(Duration::from_millis(1200));
+                Some(thread::spawn(move || {
+                    output.read_to_end(&mut prefix).unwrap();
+                    prefix
+                }))
+            } else {
+                None
+            };
             let deadline = Instant::now() + Duration::from_secs(5);
             let status = loop {
                 match child.try_wait().unwrap() {
@@ -575,7 +629,11 @@ mod tests {
             if let Some(signal) = signal {
                 assert_eq!(status.signal(), Some(signal), "{mode}, {status:?}");
             }
-            if signal.is_none() {
+            if let Some(output) = output {
+                let output = output.join().unwrap();
+                let tail = &output[output.len().saturating_sub(2048)..];
+                assert!(status.success(), "Queued results were lost ({status:?}). Output tail follows. {}", String::from_utf8_lossy(tail));
+            } else if signal.is_none() {
                 assert!(!status.success(), "The broken stdout did not interrupt the fixture.");
             }
         }));
@@ -605,6 +663,11 @@ mod tests {
         for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
             termination_case(Some(signal), "blocked-output");
         }
+    }
+
+    #[test]
+    fn queued_results_survive_slow_output_replay_after_launcher_exit() {
+        termination_case(None, "backlog-results");
     }
 
     #[test]
