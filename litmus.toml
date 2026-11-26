@@ -4,6 +4,7 @@ place = 109535589334533
 
 [standalone]
 run = ["lune", "run"]
+timeout = 300
 lib = "lib"
 
 specs = ["tests"]

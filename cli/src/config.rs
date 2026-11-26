@@ -69,7 +69,7 @@ impl Config {
             format!(
                 "{FILE} names no command to run the tests with; it needs a [standalone] table with \
                  the command that runs a Luau file as `run`, the folder of litmus's lib as `lib`, \
-                 and where to look for .spec files as `specs`"
+                 where to look for .spec files as `specs`, and the whole-process limit in seconds as `timeout` (0 disables it)"
             )
         })
     }
@@ -80,7 +80,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    const STANDALONE: &str = "[standalone]\nrun = [\"lune\", \"run\"]\nlib = \"lib\"\nspecs = [\"tests\"]\n";
+    const STANDALONE: &str = "[standalone]\nrun = [\"lune\", \"run\"]\nlib = \"lib\"\nspecs = [\"tests\"]\ntimeout = 300\n";
 
     #[test]
     fn reads_where_a_cloud_run_happens() {
@@ -154,9 +154,38 @@ mod tests {
                 lib: "lib".to_owned(),
                 specs: vec!["tests".to_owned()],
                 adapter: None,
+                timeout: 300,
                 flags: vec![],
             })
         );
+    }
+
+    #[test]
+    fn requires_an_explicit_standalone_timeout() {
+        let text = STANDALONE.replace("timeout = 300\n", "");
+        let problem = Config::parse(&text).unwrap_err();
+
+        assert!(problem.contains("timeout"), "{problem}");
+    }
+
+    #[test]
+    fn reads_positive_and_disabled_standalone_timeouts() {
+        for timeout in [0, 1, 300, 900] {
+            let text = STANDALONE.replace("timeout = 300", &format!("timeout = {timeout}"));
+            let standalone = Config::parse(&text).unwrap().standalone().unwrap();
+
+            assert_eq!(standalone.timeout, timeout);
+        }
+    }
+
+    #[test]
+    fn refuses_invalid_or_unrepresentable_standalone_timeouts() {
+        for timeout in ["-1", "1.5", "\"900\"", "true", "[]", "9223372036854775808", "9223372036854775807"] {
+            let text = STANDALONE.replace("timeout = 300", &format!("timeout = {timeout}"));
+            let problem = Config::parse(&text).unwrap_err();
+
+            assert!(problem.contains("timeout"), "{timeout} produced {problem}");
+        }
     }
 
     #[test]
@@ -176,9 +205,14 @@ mod tests {
 
     #[test]
     fn refuses_a_command_it_could_not_run() {
-        assert!(Config::parse("[standalone]\nlib = \"lib\"\nspecs = [\"tests\"]\n").is_err());
-        assert!(Config::parse("[standalone]\nrun = []\nlib = \"lib\"\nspecs = [\"tests\"]\n").is_err());
-        assert!(Config::parse("[standalone]\nrun = \"lune run\"\nlib = \"lib\"\nspecs = [\"tests\"]\n").is_err());
+        let missing = STANDALONE.replace("run = [\"lune\", \"run\"]\n", "");
+        assert!(Config::parse(&missing).unwrap_err().contains("missing field `run`"));
+
+        let empty = STANDALONE.replace("run = [\"lune\", \"run\"]", "run = []");
+        assert!(Config::parse(&empty).unwrap_err().contains("`run` has to start with the command"));
+
+        let string = STANDALONE.replace("run = [\"lune\", \"run\"]", "run = \"lune run\"");
+        assert!(Config::parse(&string).unwrap_err().contains("expected a sequence"));
 
         let problem = Config::parse(&format!("{STANDALONE}flags = [\"cloud\"]\n")).unwrap_err();
         assert!(problem.contains("[standalone]") && problem.contains("\"cloud\""), "{problem}");
