@@ -46,6 +46,10 @@ export type Run = {
     failure: string?,
 }
 
+export type Options = {
+    specsAtOnce: number?,
+}
+
 export type Progress =
     { kind: "loading", spec: number }
     | { kind: "loaded", spec: number, tests: number }
@@ -102,7 +106,7 @@ local function waitFor(running: Running): ()
     end
 end
 
-local function runSpec(adapter: Adapter, spec: Spec, index: number, running: Running, tell: Tell): SpecResult
+local function runSpec(adapter: Adapter, spec: Spec, index: number, running: Running, tell: Tell, done: () -> ()): SpecResult
     collector.begin()
     tell({ kind = "loading", spec = index })
 
@@ -132,6 +136,7 @@ local function runSpec(adapter: Adapter, spec: Spec, index: number, running: Run
             end
 
             tell({ kind = "finished", spec = index })
+            done()
         end)
     end
 
@@ -187,7 +192,21 @@ end
 
 local runner = {}
 
-function runner.run(adapter: Adapter, observe: Tell?): Run
+local function limitOf(options: Options?): number
+    local limit: unknown = if options then options.specsAtOnce else nil
+    if limit == nil then
+        return math.huge
+    end
+
+    if type(limit) ~= "number" or limit < 1 or limit % 1 ~= 0 then
+        error(`[Litmus]: specsAtOnce is {tostring(limit)}; it's how many specs may run at once, a whole number from 1`, 0)
+    end
+
+    return limit
+end
+
+function runner.run(adapter: Adapter, observe: Tell?, options: Options?): Run
+    local limit: number = limitOf(options)
     local results: { SpecResult } = {}
     local running: Running = { count = 0, waiter = nil }
 
@@ -197,8 +216,28 @@ function runner.run(adapter: Adapter, observe: Tell?): Run
         end
     end
 
+    -- Specs that loaded and haven't finished. At the limit, the next spec waits to load
+    -- until one of them finishes.
+    local open: Running = { count = 0, waiter = nil }
+
+    local function done(): ()
+        open.count -= 1
+
+        local waiter: thread? = open.waiter
+        if waiter and open.count < limit then
+            open.waiter = nil
+            adapter.spawn(waiter)
+        end
+    end
+
     for index, spec in adapter.specs do
-        table.insert(results, runSpec(adapter, spec, index, running, tell))
+        if open.count >= limit then
+            open.waiter = coroutine.running()
+            coroutine.yield()
+        end
+
+        open.count += 1
+        table.insert(results, runSpec(adapter, spec, index, running, tell, done))
     end
 
     waitFor(running)

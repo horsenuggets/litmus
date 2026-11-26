@@ -11,6 +11,7 @@ export type Adapter = runner.Adapter
 export type Remarks = runner.Remarks
 export type Run = runner.Run
 export type Progress = runner.Progress
+export type Options = runner.Options
 
 export type Piece = report.Piece
 export type Row = report.Row

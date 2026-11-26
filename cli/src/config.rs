@@ -155,6 +155,7 @@ mod tests {
                 specs: vec!["tests".to_owned()],
                 adapter: None,
                 flags: vec![],
+                specs_at_once: None,
             })
         );
     }
@@ -166,6 +167,15 @@ mod tests {
 
         assert_eq!(standalone.adapter, Some("tools/adapter.luau".to_owned()));
         assert_eq!(standalone.flags, ["coverage"]);
+    }
+
+    #[test]
+    fn reads_how_many_specs_may_run_at_once() {
+        let text = format!("{STANDALONE}specs_at_once = 2\n");
+        assert_eq!(Config::parse(&text).unwrap().standalone().unwrap().specs_at_once, Some(2));
+
+        let problem = Config::parse(&format!("{STANDALONE}specs_at_once = 0\n")).unwrap_err();
+        assert!(problem.contains("specs_at_once"), "{problem}");
     }
 
     #[test]

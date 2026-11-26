@@ -1,6 +1,6 @@
 [package]
 name = "litmus"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 description = "A test runner for Luau and Roblox projects"
 license = "MIT"

@@ -24,6 +24,7 @@ pub struct Standalone {
     pub adapter: Option<String>,
     #[serde(default)]
     pub flags: Vec<String>,
+    pub specs_at_once: Option<u32>,
 }
 
 impl Standalone {
@@ -34,6 +35,10 @@ impl Standalone {
 
         for path in self.specs.iter() {
             relative(path)?;
+        }
+
+        if self.specs_at_once == Some(0) {
+            return Err("`specs_at_once` has to let at least 1 spec run".to_owned());
         }
 
         for path in [&self.lib].into_iter().chain(&self.adapter) {
@@ -96,6 +101,7 @@ mod tests {
             specs: vec!["tests".to_owned()],
             adapter: None,
             flags: vec!["coverage".to_owned()],
+            specs_at_once: None,
         }
     }
 
@@ -118,6 +124,12 @@ mod tests {
     fn refuses_a_table_without_a_command() {
         assert!(Standalone { run: vec![], ..standalone() }.check().is_err());
         assert!(Standalone { run: vec![String::new()], ..standalone() }.check().is_err());
+    }
+
+    #[test]
+    fn refuses_a_limit_that_lets_no_spec_run() {
+        assert!(Standalone { specs_at_once: Some(0), ..standalone() }.check().is_err());
+        assert_eq!(Standalone { specs_at_once: Some(1), ..standalone() }.check(), Ok(()));
     }
 
     #[test]
