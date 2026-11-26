@@ -1,5 +1,6 @@
 mod cloud;
 mod config;
+mod interrupt;
 mod luau;
 mod manifest;
 mod piece;
@@ -17,6 +18,7 @@ mod style;
 mod testing;
 
 use config::Config;
+use interrupt::Interrupt;
 use manifest::Manifest;
 use render::Sources;
 use results::Run;
@@ -164,9 +166,9 @@ impl Command {
         }
     }
 
-    fn run(self) -> Result<bool, String> {
+    fn run(self, interrupt: &Interrupt) -> Result<bool, String> {
         match self {
-            Command::Test(command) => run_tests(&command),
+            Command::Test(command) => run_tests(&command, interrupt),
             Command::PluginInstall => plugin::install().and(Ok(true)),
             Command::PluginUninstall => plugin::uninstall().and(Ok(true)),
             Command::Help => {
@@ -192,7 +194,27 @@ fn main() -> ExitCode {
         }
     };
 
-    match command.run() {
+    dispatch(command)
+}
+
+fn dispatch(command: Command) -> ExitCode {
+    let interrupt = Interrupt::default();
+    if matches!(&command, Command::Test(command) if command.backend == Backend::Standalone)
+        && let Err(error) = interrupt.install()
+    {
+        eprintln!("litmus: couldn't install the interrupt handler: {error}");
+        return ExitCode::from(2);
+    }
+
+    let outcome = command.run(&interrupt);
+    if let Some(signal) = interrupt.signal() {
+        if let Err(message) = &outcome {
+            eprintln!("litmus: {message}");
+        }
+        interrupt::terminate(signal);
+    }
+
+    match outcome {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => ExitCode::from(1),
         Err(message) => {
@@ -202,7 +224,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_tests(command: &TestCommand) -> Result<bool, String> {
+fn run_tests(command: &TestCommand, interrupt: &Interrupt) -> Result<bool, String> {
     let project_dir = Path::new(".");
 
     if command.backend != Backend::Standalone
@@ -218,7 +240,7 @@ fn run_tests(command: &TestCommand) -> Result<bool, String> {
     let ran = match command.backend {
         Backend::Plugin => run_with_plugin(project_dir, &selection)?,
         Backend::Cloud => run_in_cloud(project_dir, &selection)?,
-        Backend::Standalone => run_standalone(project_dir, &command.flags, &selection)?,
+        Backend::Standalone => run_standalone(project_dir, &command.flags, &selection, interrupt)?,
     };
 
     let run = Run::deserialize(&ran.results)
@@ -235,11 +257,11 @@ fn run_tests(command: &TestCommand) -> Result<bool, String> {
     Ok(run.passed())
 }
 
-fn run_standalone(project_dir: &Path, flags: &[String], selection: &Selection) -> Result<Ran, String> {
+fn run_standalone(project_dir: &Path, flags: &[String], selection: &Selection, interrupt: &Interrupt) -> Result<Ran, String> {
     let standalone = Config::read(project_dir)?.standalone()?;
 
     Ok(Ran {
-        results: standalone::run(project_dir, &standalone, flags, selection)?,
+        results: standalone::run(project_dir, &standalone, flags, selection, interrupt)?,
         sources: Sources::Disk,
     })
 }
@@ -364,7 +386,7 @@ mod tests {
             paths: vec![],
         };
 
-        let problem = run_tests(&command).unwrap_err();
+        let problem = run_tests(&command, &Interrupt::default()).unwrap_err();
 
         assert!(problem.contains("--coverage") && problem.contains("--standalone"), "{problem}");
     }
