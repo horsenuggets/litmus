@@ -16,12 +16,12 @@ local function show(event: litmus.Progress): string
     return `{event.kind} {event.spec}`
 end
 
-local function eventsOf(loads: { () -> () }): { string }
+local function eventsOf(loads: { () -> () }, options: litmus.Options?): { string }
     local events: { string } = {}
 
     litmus.run(inline(loads), function(event: litmus.Progress): ()
         table.insert(events, show(event))
-    end)
+    end, options)
 
     return events
 end
@@ -99,6 +99,62 @@ test("numbers specs in the adapter's order, and loads the next while tests still
         "finished 1",
         "settled",
     })
+end)
+
+test("loads the next spec only once one finishes, when one spec may run at a time", function(): ()
+    local events: { string } = eventsOf({
+        function(): ()
+            litmus.test("waits", function(): ()
+                task.wait(0.05)
+            end)
+        end,
+
+        function(): () end,
+    }, { specsAtOnce = 1 })
+
+    expect.same(events, {
+        "loading 1",
+        "loaded 1 with 1",
+        "tested 1 passed",
+        "finished 1",
+        "loading 2",
+        "loaded 2 with 0",
+        "finished 2",
+        "settled",
+    })
+end)
+
+test("keeps as many specs running as the limit lets", function(): ()
+    local waits = function(): ()
+        litmus.test("waits", function(): ()
+            task.wait(0.05)
+        end)
+    end
+
+    local events: { string } = eventsOf({ waits, waits, function(): () end }, { specsAtOnce = 2 })
+
+    expect.same(events, {
+        "loading 1",
+        "loaded 1 with 1",
+        "loading 2",
+        "loaded 2 with 1",
+        "tested 1 passed",
+        "finished 1",
+        "loading 3",
+        "loaded 3 with 0",
+        "finished 3",
+        "tested 2 passed",
+        "finished 2",
+        "settled",
+    })
+end)
+
+test("refuses a limit that isn't a whole number from 1", function(): ()
+    for _, limit in { 0, 1.5, "1" } do
+        expect.error(function(): ()
+            litmus.run(inline({}), nil, { specsAtOnce = limit :: any })
+        end, `specsAtOnce is {limit}`)
+    end
 end)
 
 test("reports that every test is done before the adapter gives its results", function(): ()

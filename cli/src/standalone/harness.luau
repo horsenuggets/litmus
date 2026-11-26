@@ -42,4 +42,4 @@ local function observe(event: any): ()
     print(progressMarker .. encode(event))
 end
 
-print(marker .. encode(litmus.run(adapter(options), observe)))
+print(marker .. encode(litmus.run(adapter(options), observe, runOptions)))

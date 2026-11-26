@@ -35,6 +35,11 @@ pub fn script(standalone: &Standalone, specs: &[String], flags: &[String]) -> Re
         String::new(),
         format!("    flags = {},", table(&flags)),
         "}".to_owned(),
+        String::new(),
+        match standalone.specs_at_once {
+            Some(limit) => format!("local runOptions = {{ specsAtOnce = {limit} }}"),
+            None => "local runOptions = {}".to_owned(),
+        },
     ];
 
     Ok(format!("{}\n\n{HARNESS}", header.join("\n")))
@@ -90,10 +95,12 @@ local options = {
     },
 }
 
+local runOptions = {}
+
 "#;
 
         assert!(script.starts_with(header), "{script}");
-        assert!(script.ends_with("print(marker .. encode(litmus.run(adapter(options), observe)))\n"), "{script}");
+        assert!(script.ends_with("print(marker .. encode(litmus.run(adapter(options), observe, runOptions)))\n"), "{script}");
     }
 
     #[test]
@@ -111,5 +118,17 @@ local options = {
 
         assert!(script.starts_with(requires), "{script}");
         assert!(script.contains(options), "{script}");
+    }
+
+    #[test]
+    fn the_harness_hands_the_runner_the_limit_on_specs_at_once() {
+        let standalone = Standalone {
+            specs_at_once: Some(1),
+            ..standalone()
+        };
+
+        let script = script(&standalone, &[], &[]).unwrap();
+
+        assert!(script.contains("\nlocal runOptions = { specsAtOnce = 1 }\n"), "{script}");
     }
 }

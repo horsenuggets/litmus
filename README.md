@@ -125,11 +125,12 @@ lib = "litmus/lib"
 specs = ["tests"]
 adapter = "tests/Adapter.luau"
 flags = ["coverage"]
+specs_at_once = 1
 ```
 
 - **`[rojo]`**: `project` is the Rojo project a plugin or cloud run reads the place from, when it isn't the default one.
 - **`[cloud]`**: `universe` and `place` name the experience and its place. Each run saves the project as a new, unpublished version of that place. `build` is a `.rbxl` to use as that version, for when Rojo alone doesn't build the whole place.
-- **`[standalone]`**: `run` is the command that runs a Luau file, `lib` is the folder of litmus's lib, and `specs` is where to look for `.spec` files. `adapter` and `flags` are for a project with an adapter of its own.
+- **`[standalone]`**: `run` is the command that runs a Luau file, `lib` is the folder of litmus's lib, and `specs` is where to look for `.spec` files. `adapter` and `flags` are for a project with an adapter of its own. `specs_at_once` is how many specs may run at the same time: the next spec waits to load until one finishes. Leave it out to load every spec straight away, as before; a low limit keeps specs that hold a lot in memory from all holding it at once.
 
 A cloud run also needs an Open Cloud API key in `LITMUS_API_KEY`, read from the environment or else from the project's `.env`. Keep `.env` out of version control.
 
