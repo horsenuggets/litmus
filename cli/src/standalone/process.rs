@@ -238,9 +238,9 @@ fn stop_owned(mut child: Box<dyn process_wrap::std::ChildWrapper>, shown: &str) 
 fn stop(child: &mut Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Result<ExitStatus, String> {
     #[cfg(unix)]
     let stop_deadline = Instant::now() + Duration::from_secs(1);
+    #[cfg(unix)]
     let stopped = loop {
         match child.start_kill() {
-            #[cfg(unix)]
             Err(error) if error.raw_os_error() == Some(libc::EPERM) && Instant::now() < stop_deadline => {
                 // Keep the leader reserved through retries, even if macOS rejects the
                 // signal while it exits. Persistent permission errors remain visible.
@@ -249,6 +249,8 @@ fn stop(child: &mut Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Re
             result => break result,
         }
     };
+    #[cfg(windows)]
+    let stopped = child.start_kill();
     if let Err(error) = stopped {
         #[cfg(unix)]
         let already_gone = error.raw_os_error() == Some(libc::ESRCH);
