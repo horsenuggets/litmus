@@ -125,13 +125,15 @@ test("loads the next spec only once one finishes, when one spec may run at a tim
 end)
 
 test("keeps as many specs running as the limit lets", function(): ()
-    local waits = function(): ()
-        litmus.test("waits", function(): ()
-            task.wait(0.05)
-        end)
+    local function waits(seconds: number): () -> ()
+        return function(): ()
+            litmus.test("waits", function(): ()
+                task.wait(seconds)
+            end)
+        end
     end
 
-    local events: { string } = eventsOf({ waits, waits, function(): () end }, { specsAtOnce = 2 })
+    local events: { string } = eventsOf({ waits(0.05), waits(0.15), function(): () end }, { specsAtOnce = 2 })
 
     expect.same(events, {
         "loading 1",
