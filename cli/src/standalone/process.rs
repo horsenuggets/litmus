@@ -89,6 +89,21 @@ fn run_with_budget(
             Err(RecvTimeoutError::Disconnected) => break Ok(None),
         }
 
+        // Poll the launcher, not the group or job. Descendants can keep stdout open.
+        // SAFETY: Only its cached exit status changes. Ownership wrappers keep their
+        // handles and delegate their final wait to this same native child.
+        let launcher_status = {
+            let mut owned = child.lock().unwrap();
+            let child = owned.as_mut().expect("The run still owns its child.");
+            let launcher = unsafe { child.try_inner_child_mut() }.expect("The command has a native child.");
+            launcher.try_wait()
+        };
+        match launcher_status {
+            Ok(Some(_)) => break Ok(None),
+            Ok(None) => {}
+            Err(error) => break Err(format!("couldn't tell how `{shown}` ended: {error}")),
+        }
+
         if Instant::now() >= deadline {
             break Err(format!("`{shown}` was stopped, still running after {}", in_words(budget)));
         }
@@ -102,6 +117,24 @@ fn run_with_budget(
         let mut owned = child.lock().unwrap();
         stop_owned(owned.take().expect("The run still owns its child."), &shown)
     };
+    if stopped.is_ok() {
+        let drain_deadline = Instant::now() + Duration::from_secs(1);
+        let mut final_report = None;
+        while Instant::now() < drain_deadline && !interrupt.cancelled() {
+            match receiver.recv_timeout(TICK) {
+                Ok(Message::Printed(line)) => display.print(&line),
+                Ok(Message::Event(event)) => display.take(event),
+                Ok(Message::Results(results)) => {
+                    final_report = Some(results);
+                    break;
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+        display.finish();
+        reported = reported.map(|report| report.or(final_report));
+    }
     if interrupt.cancelled() {
         reported = Err("the standalone run was interrupted".to_owned());
     }
@@ -282,15 +315,15 @@ mod tests {
     #[ignore = "invoked as a subprocess by process cleanup tests"]
     fn wrapper_fixture() {
         let mode = fs::read_to_string("mode").unwrap();
-        let mut command = fixture_command("standalone::process::tests::descendant_fixture");
-        if mode == "missing" {
-            command.stdout(Stdio::null());
-        }
-        let mut child = command.spawn().unwrap();
-        if mode == "missing" {
+        let mut child = fixture_command("standalone::process::tests::descendant_fixture").spawn().unwrap();
+        if matches!(mode.as_str(), "escaped" | "missing" | "exited-results") {
             let deadline = Instant::now() + Duration::from_secs(5);
             while !Path::new("ready").exists() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(10));
+            }
+            if mode == "exited-results" {
+                println!("\n{MARKER}{{\"specs\":[]}}");
+                std::io::stdout().flush().unwrap();
             }
         } else {
             child.wait().unwrap();
@@ -302,6 +335,10 @@ mod tests {
     fn descendant_fixture() {
         let address = fs::read_to_string("address").unwrap();
         let mode = fs::read_to_string("mode").unwrap();
+        #[cfg(unix)]
+        if mode == "escaped" {
+            assert_ne!(unsafe { libc::setsid() }, -1);
+        }
         let mut connection = TcpStream::connect(address).unwrap();
         connection.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
         connection.write_all(&[1]).unwrap();
@@ -392,7 +429,11 @@ mod tests {
             if !closed {
                 let _ = connection.write_all(&[0]);
             }
-            assert!(closed, "The runtime descendant survived the {mode} exit ({read:?}). Runner returned {result:?}.");
+            if mode == "escaped" {
+                assert!(!closed, "The escaped fixture must retain the inherited output pipe.");
+            } else {
+                assert!(closed, "The runtime descendant survived the {mode} exit ({read:?}). Runner returned {result:?}.");
+            }
             result
         })
     }
@@ -400,6 +441,18 @@ mod tests {
     #[test]
     fn reported_results_stop_the_wrapper_and_runtime() {
         assert_eq!(cleaned_up("results").unwrap(), "{\"specs\":[]}");
+    }
+
+    #[test]
+    fn keeps_results_printed_just_before_the_wrapper_exits() {
+        assert_eq!(cleaned_up("exited-results").unwrap(), "{\"specs\":[]}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn escaped_output_writer_does_not_hold_the_runner_open() {
+        let problem = cleaned_up("escaped").unwrap_err();
+        assert!(problem.contains("ended without reporting any results"), "{problem}");
     }
 
     #[test]
@@ -411,11 +464,7 @@ mod tests {
     fn missing_results_stop_a_runtime_after_its_wrapper_exits() {
         let problem = cleaned_up("missing").unwrap_err();
 
-        // A Windows descendant inherits its launcher's output pipe, so the pipe stays open after
-        // the launcher exits and the run stops at its budget. Either way the descendant is gone.
-        let ended = problem.contains("ended without reporting any results");
-        let stopped = cfg!(windows) && problem.contains("was stopped, still running");
-        assert!(ended || stopped, "{problem}");
+        assert!(problem.contains("ended without reporting any results"), "{problem}");
     }
 
     #[test]
