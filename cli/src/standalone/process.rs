@@ -44,9 +44,7 @@ fn run_with_budget(project_dir: &Path, run: &[String], specs: &[String], budget:
     command.wrap(JobObject);
 
     let mut child = command.spawn().map_err(|error| {
-        format!(
-            "couldn't start `{shown}`, which begins with what litmus.toml gives as `run` under [standalone]: {error}"
-        )
+        format!("couldn't start `{shown}`, which begins with what litmus.toml gives as `run` under [standalone]: {error}")
     })?;
     let output = child.stdout().take().expect("The runtime stdout was piped.");
 
@@ -66,10 +64,7 @@ fn run_with_budget(project_dir: &Path, run: &[String], specs: &[String], budget:
         }
 
         if Instant::now() >= deadline {
-            break Err(format!(
-                "`{shown}` was stopped, still running after {} seconds",
-                budget.as_secs()
-            ));
+            break Err(format!("`{shown}` was stopped, still running after {}", in_words(budget)));
         }
 
         display.refresh();
@@ -132,6 +127,13 @@ fn outcome(
     }
 }
 
+fn in_words(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+    let (count, unit) = if seconds >= 60 && seconds % 60 == 0 { (seconds / 60, "minute") } else { (seconds, "second") };
+
+    format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
+}
+
 fn relay(mut output: impl BufRead, mut pass: impl FnMut(Message) -> bool) {
     let mut line = Vec::new();
 
@@ -189,11 +191,7 @@ mod tests {
 
         assert_eq!(
             passed,
-            [
-                printed("first"),
-                printed("second"),
-                Message::Results("{\"specs\":[]}".to_owned())
-            ]
+            [printed("first"), printed("second"), Message::Results("{\"specs\":[]}".to_owned())]
         );
     }
 
@@ -206,10 +204,7 @@ mod tests {
 
     #[test]
     fn drops_a_line_of_progress_it_cannot_read() {
-        assert_eq!(
-            relayed("@@litmus-progress@@{\"kind\":\"unheard-of\"}\nprinted\n"),
-            [printed("printed")]
-        );
+        assert_eq!(relayed("@@litmus-progress@@{\"kind\":\"unheard-of\"}\nprinted\n"), [printed("printed")]);
     }
 
     #[test]
@@ -379,15 +374,19 @@ mod tests {
         assert_eq!(outcome, Err("`lune run` ended without reporting any results, and couldn't stop it".to_owned()));
     }
 
+    #[test]
+    fn gives_the_budget_in_minutes_when_it_is_whole_minutes() {
+        assert_eq!(in_words(Duration::from_secs(300)), "5 minutes");
+        assert_eq!(in_words(Duration::from_secs(60)), "1 minute");
+        assert_eq!(in_words(Duration::from_secs(2)), "2 seconds");
+        assert_eq!(in_words(Duration::from_secs(90)), "90 seconds");
+    }
 
     #[test]
     fn a_command_that_cannot_start_is_named() {
         let command = ["litmus-no-such-command".to_owned(), "run".to_owned()];
         let problem = run(Path::new("."), &command, &[]).unwrap_err();
 
-        assert!(
-            problem.contains("`litmus-no-such-command run .litmus/run.luau`"),
-            "{problem}"
-        );
+        assert!(problem.contains("`litmus-no-such-command run .litmus/run.luau`"), "{problem}");
     }
 }
