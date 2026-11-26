@@ -109,10 +109,12 @@ impl TestCommand {
             };
 
             match Backend::named(name) {
-                Some(_) if let Some(first) = backend => {
-                    return Err(format!("--{first} and --{name} each pick a backend, and a run takes one"));
+                Some(_) => {
+                    if let Some(first) = backend {
+                        return Err(format!("--{first} and --{name} each pick a backend, and a run takes one"));
+                    }
+                    backend = Some(name);
                 }
-                Some(_) => backend = Some(name),
                 None if name.is_empty() => return Err("-- names no flag".to_owned()),
                 None => flags.push(name.to_owned()),
             }
