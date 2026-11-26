@@ -293,13 +293,16 @@ mod tests {
         };
         connection.set_nonblocking(false).unwrap();
         connection.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
-        connection.read_exact(&mut [0]).unwrap();
-        let read = connection.read(&mut [0]);
+        // Windows resets a connection whose peer was killed before its data was read, dropping
+        // the handshake byte too, so a reset or an early end at either read means it is gone.
+        let read = connection.read_exact(&mut [0]).and_then(|()| connection.read(&mut [0]));
         let closed = match &read {
             Ok(0) => true,
             Err(error) => matches!(
                 error.kind(),
-                std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::ConnectionReset
+                std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::UnexpectedEof
             ),
             _ => false,
         };
@@ -330,11 +333,13 @@ mod tests {
 
     #[test]
     fn missing_results_stop_a_runtime_after_its_wrapper_exits() {
-        assert!(
-            cleaned_up("missing")
-                .unwrap_err()
-                .contains("ended without reporting any results")
-        );
+        let problem = cleaned_up("missing").unwrap_err();
+
+        // A Windows descendant inherits its launcher's output pipe, so the pipe stays open after
+        // the launcher exits and the run stops at its budget. Either way the descendant is gone.
+        let ended = problem.contains("ended without reporting any results");
+        let stopped = cfg!(windows) && problem.contains("was stopped, still running");
+        assert!(ended || stopped, "{problem}");
     }
 
     fn exited() -> ExitStatus {

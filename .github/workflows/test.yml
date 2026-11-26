@@ -7,10 +7,16 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same pull request replaces the run of the one before
+concurrency:
+  group: test-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   standalone:
     name: CLI tests and standalone specs
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v7
@@ -29,11 +35,58 @@ jobs:
       - name: Run the specs
         run: cli/target/debug/litmus test --standalone
 
+  # The release builds on every system here, so each one runs the same checks before a tag can fail on them
+  platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: Windows
+            runner: windows-latest
+
+          # The release builds the Intel Mac binary on this Apple silicon runner too
+          - system: macOS
+            runner: macos-latest
+            cross: x86_64-apple-darwin
+
+    name: CLI tests on ${{ matrix.system }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the tools
+        uses: CompeyDev/setup-rokit@v0.2.1
+
+      - name: Test the CLI
+        working-directory: cli
+        run: cargo test --locked
+
+      - name: Build the CLI
+        working-directory: cli
+        run: cargo build --locked
+
+      - name: Run the specs
+        run: cli/target/debug/litmus test --standalone
+
+      - name: Check the cross-built target
+        if: matrix.cross
+        working-directory: cli
+        run: |
+          rustup target add ${{ matrix.cross }}
+          cargo check --locked --target ${{ matrix.cross }}
+
   # A pull request from a fork gets no secrets here. To run its cloud specs, push its reviewed head to a branch here and open a pull request from that
   cloud:
     name: Specs in the cloud
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v7
