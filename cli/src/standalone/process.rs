@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 mod windows_tests;
 
 const BUDGET: Duration = Duration::from_secs(300);
+const CLEANUP_BUDGET: Duration = Duration::from_secs(1);
 const TICK: Duration = Duration::from_millis(100);
 
 #[derive(Debug, PartialEq)]
@@ -40,6 +41,14 @@ impl OwnedChild {
         let stopped = stop_owned(self.child.take().expect("The run still owns its child."), shown);
         self.stopped = Some(stopped.clone());
         stopped
+    }
+}
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        if let Some(child) = self.child.take() {
+            let _ = stop_owned(child, "the standalone runtime");
+        }
     }
 }
 
@@ -227,17 +236,16 @@ fn launcher_exited(child: &mut std::process::Child) -> std::io::Result<bool> {
 
 fn stop_owned(mut child: Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Result<ExitStatus, String> {
     let stopped = stop(&mut child, shown);
-    if stopped.is_ok() {
-        // Disarm the outer drop guard once its group/job has been stopped and reaped.
-        drop(child.into_inner());
-    }
+    // The bounded cleanup already attempted both owners. Never enter the wrapper's
+    // unbounded kill-and-wait again, or signal a PGID after reaping its launcher.
+    drop(child.into_inner());
     stopped
 }
 
 // Stops the owned process group or job, then reaps the launcher.
 fn stop(child: &mut Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Result<ExitStatus, String> {
     #[cfg(unix)]
-    let stop_deadline = Instant::now() + Duration::from_secs(1);
+    let stop_deadline = Instant::now() + CLEANUP_BUDGET;
     #[cfg(unix)]
     let stopped = loop {
         match child.start_kill() {
@@ -251,17 +259,60 @@ fn stop(child: &mut Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Re
     };
     #[cfg(windows)]
     let stopped = child.start_kill();
-    if let Err(error) = stopped {
+    let tree_problem = stopped.err().and_then(|error| {
         #[cfg(unix)]
-        let already_gone = error.raw_os_error() == Some(libc::ESRCH);
-        #[cfg(not(unix))]
-        let already_gone = false;
-        if !already_gone {
-            return Err(format!("couldn't stop the process tree for `{shown}`, so it may still be running: {error}"));
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            return None;
         }
-    }
+        Some(format!("couldn't stop the process tree for `{shown}`, so it may still be running: {error}"))
+    });
 
-    child.wait().map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))
+    // A launcher can leave its original group. Its native child remains ours, so
+    // terminate it independently before any wait can release its numeric identity.
+    let native_error = {
+        // SAFETY: The wrapper keeps this native child and all ownership handles alive.
+        let launcher = unsafe { child.try_inner_child_mut() }.expect("The command has a native child.");
+        launcher.kill().err()
+    };
+    let status = wait_for_exit(
+        || {
+            #[cfg(unix)]
+            {
+                // Group polling can miss a launcher that moved groups. No more group
+                // signals follow this native reap, so PID reuse is harmless here.
+                let launcher = unsafe { child.try_inner_child_mut() }.expect("The command has a native child.");
+                launcher.try_wait()
+            }
+            #[cfg(windows)]
+            child.try_wait()
+        },
+        Instant::now() + CLEANUP_BUDGET,
+    )
+    .map_err(|error| match native_error {
+        Some(kill) => format!("couldn't stop or reap the launcher for `{shown}`, so it may still be running ({kill}; {error})"),
+        None => format!("couldn't reap the launcher for `{shown}` before cleanup ended, so it may still be running: {error}"),
+    });
+    match (tree_problem, status) {
+        (Some(problem), Err(wait)) => Err(format!("{problem}, and {wait}")),
+        (Some(problem), Ok(_)) => Err(problem),
+        (None, status) => status,
+    }
+}
+
+fn wait_for_exit(
+    mut poll: impl FnMut() -> std::io::Result<Option<ExitStatus>>,
+    deadline: Instant,
+) -> std::io::Result<ExitStatus> {
+    loop {
+        if let Some(status) = poll()? {
+            return Ok(status);
+        }
+        let wait = deadline.saturating_duration_since(Instant::now()).min(TICK);
+        if wait.is_zero() {
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "Cleanup could not confirm process termination."));
+        }
+        thread::sleep(wait);
+    }
 }
 
 // What the run comes to. Results the runtime reported still count when stopping it then
@@ -398,6 +449,13 @@ mod tests {
         #[cfg(windows)]
         super::windows_tests::ignore_ctrl_c(true);
         let mode = fs::read_to_string("mode").unwrap();
+        #[cfg(unix)]
+        if matches!(mode.as_str(), "moved-launcher" | "moved-launcher-broken-pipe") {
+            let group = fs::read_to_string("parent-group").unwrap().parse::<libc::pid_t>().unwrap();
+            assert_eq!(unsafe { libc::setpgid(0, group) }, 0);
+            descendant_fixture();
+            return;
+        }
         let mut child = fixture_command("standalone::process::tests::descendant_fixture").spawn().unwrap();
         if matches!(mode.as_str(), "backlog-results" | "escaped" | "missing" | "exited-results") {
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -443,7 +501,7 @@ mod tests {
         let prints = match mode.as_str() {
             "backlog-results" | "interrupt-output" => 10_000,
             "blocked-output" | "timeout-output" => 1_000_000,
-            "broken-pipe" => 1,
+            "broken-pipe" | "moved-launcher-broken-pipe" => 1,
             _ => 0,
         };
         for _ in 0..prints {
@@ -474,6 +532,10 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         project.write("address", &listener.local_addr().unwrap().to_string());
         project.write("mode", mode);
+        #[cfg(unix)]
+        if mode == "moved-launcher" {
+            project.write("parent-group", &unsafe { libc::getpgrp() }.to_string());
+        }
         let command = wrapper_run();
         thread::scope(|scope| {
             let (finished, completion) = mpsc::sync_channel(1);
@@ -527,6 +589,16 @@ mod tests {
         })
     }
 
+    #[test]
+    fn cleanup_waits_return_a_status_or_a_bounded_error() {
+        let deadline = Instant::now();
+        assert!(wait_for_exit(|| Ok(Some(exited())), deadline).unwrap().success());
+        let pending = wait_for_exit(|| Ok(None), deadline).unwrap_err();
+        assert_eq!(pending.kind(), std::io::ErrorKind::TimedOut);
+        let refused = wait_for_exit(|| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)), deadline).unwrap_err();
+        assert_eq!(refused.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
     #[cfg(unix)]
     #[test]
     fn launcher_polling_keeps_its_process_group_identifier_reserved_until_cleanup() {
@@ -564,6 +636,12 @@ mod tests {
     #[test]
     fn timeout_stops_the_wrapper_and_runtime() {
         assert!(cleaned_up("timeout").unwrap_err().contains("was stopped, still running"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_launcher_that_changes_groups_is_still_stopped_and_reaped() {
+        assert!(cleaned_up("moved-launcher").unwrap_err().contains("was stopped, still running"));
     }
 
     #[test]
@@ -604,6 +682,10 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         project.write("address", &listener.local_addr().unwrap().to_string());
         project.write("mode", mode);
+        #[cfg(unix)]
+        if mode == "moved-launcher-broken-pipe" {
+            project.write("parent-group", &unsafe { libc::getpgrp() }.to_string());
+        }
         project.write("tests/a.spec.luau", "");
         project.write(
             "litmus.toml",
@@ -809,6 +891,12 @@ mod tests {
     #[test]
     fn queued_results_survive_slow_output_replay_after_launcher_exit() {
         termination_case(None, "backlog-results");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn broken_stdout_stops_a_launcher_that_moved_to_another_group() {
+        termination_case(None, "moved-launcher-broken-pipe");
     }
 
     #[test]
