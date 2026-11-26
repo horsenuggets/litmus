@@ -11,6 +11,7 @@ pub struct Interrupt {
 #[derive(Default)]
 struct State {
     active: bool,
+    cleanup: Option<Arc<dyn Fn(i32) + Send + Sync>>,
     signal: Option<i32>,
 }
 
@@ -52,6 +53,19 @@ impl Interrupt {
         ActiveRun(self)
     }
 
+    pub fn on_signal(&self, cleanup: impl Fn(i32) + Send + Sync + 'static) {
+        let cleanup = Arc::new(cleanup);
+        let signal = {
+            let mut state = self.state.lock().unwrap();
+            assert!(state.active);
+            state.cleanup = Some(cleanup.clone());
+            state.signal
+        };
+        if let Some(signal) = signal {
+            cleanup(signal);
+        }
+    }
+
     pub fn signal(&self) -> Option<i32> {
         self.state.lock().unwrap().signal
     }
@@ -61,17 +75,25 @@ impl Interrupt {
     }
 
     fn request(&self, signal: i32) -> bool {
-        let mut state = self.state.lock().unwrap();
-        if state.active {
-            state.signal.get_or_insert(signal);
+        let (active, cleanup, signal) = {
+            let mut state = self.state.lock().unwrap();
+            if state.active {
+                state.signal.get_or_insert(signal);
+            }
+            (state.active, state.cleanup.clone(), state.signal.unwrap_or(signal))
+        };
+        if let Some(cleanup) = cleanup {
+            cleanup(signal);
         }
-        state.active
+        active
     }
 }
 
 impl Drop for ActiveRun<'_> {
     fn drop(&mut self) {
-        self.0.state.lock().unwrap().active = false;
+        let mut state = self.0.state.lock().unwrap();
+        state.active = false;
+        state.cleanup = None;
     }
 }
 
@@ -106,6 +128,33 @@ mod tests {
         drop(active);
         assert!(!interrupt.request(2));
         assert_eq!(interrupt.signal(), Some(1));
+    }
+
+    #[test]
+    fn cleanup_registration_observes_pending_and_repeated_signals_without_holding_the_state_lock() {
+        for pending in [false, true] {
+            let interrupt = Interrupt::default();
+            let active = interrupt.arm();
+            if pending {
+                assert!(interrupt.request(1));
+            }
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let calls = seen.clone();
+            let observed = interrupt.clone();
+            interrupt.on_signal(move |signal| {
+                assert_eq!(observed.signal(), Some(signal));
+                calls.lock().unwrap().push(signal);
+            });
+            if !pending {
+                assert!(seen.lock().unwrap().is_empty());
+                assert!(interrupt.request(1));
+            }
+            assert!(interrupt.request(2));
+            assert_eq!(*seen.lock().unwrap(), [1, 1]);
+            drop(active);
+            assert!(!interrupt.request(3));
+            assert_eq!(*seen.lock().unwrap(), [1, 1]);
+        }
     }
 
     #[test]

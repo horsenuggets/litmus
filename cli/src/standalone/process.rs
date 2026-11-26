@@ -10,6 +10,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -51,6 +52,20 @@ fn run_with_budget(
         format!("couldn't start `{shown}`, which begins with what litmus.toml gives as `run` under [standalone]: {error}")
     })?;
     let output = child.stdout().take().expect("The runtime stdout was piped.");
+    let child = Arc::new(Mutex::new(Some(child)));
+    let owned = Arc::downgrade(&child);
+    let interrupted_command = shown.clone();
+    interrupt.on_signal(move |signal| {
+        if let Some(owned) = owned.upgrade() {
+            let mut owned = owned.lock().unwrap();
+            if let Some(child) = owned.take() {
+                let _ = stop_owned(child, &interrupted_command);
+            }
+            // Hold ownership until termination so the output thread cannot race cleanup.
+            crate::interrupt::terminate(signal);
+        }
+        crate::interrupt::terminate(signal);
+    });
 
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || relay(BufReader::new(output), |message| sender.send(message).is_ok()));
@@ -83,7 +98,10 @@ fn run_with_budget(
 
     display.finish();
 
-    let stopped = stop_owned(child, &shown);
+    let stopped = {
+        let mut owned = child.lock().unwrap();
+        stop_owned(owned.take().expect("The run still owns its child."), &shown)
+    };
     if interrupt.cancelled() {
         reported = Err("the standalone run was interrupted".to_owned());
     }
@@ -303,6 +321,7 @@ mod tests {
         }
         let prints = match mode.as_str() {
             "interrupt-output" => 10_000,
+            "blocked-output" => 1_000_000,
             "broken-pipe" => 1,
             _ => 0,
         };
@@ -432,7 +451,7 @@ mod tests {
         let mut child = command
             .current_dir(&project)
             .stdin(Stdio::null())
-            .stdout(if signal.is_some() { Stdio::null() } else { Stdio::piped() })
+            .stdout(if signal.is_some() && mode != "blocked-output" { Stdio::null() } else { Stdio::piped() })
             .spawn()
             .unwrap();
         let mut connection = None;
@@ -462,6 +481,22 @@ mod tests {
                 thread::sleep(Duration::from_millis(10));
             }
             assert!(ready.exists(), "The termination fixture was not ready ({mode}).");
+            #[cfg(unix)]
+            if mode == "blocked-output" {
+                use std::os::fd::AsRawFd;
+                let output = child.stdout.as_ref().unwrap();
+                let mut previous = 0;
+                loop {
+                    let mut available = 0;
+                    assert_eq!(unsafe { libc::ioctl(output.as_raw_fd(), libc::FIONREAD, &mut available) }, 0);
+                    if available >= 4096 && available == previous {
+                        break;
+                    }
+                    assert!(Instant::now() < deadline, "The downstream output pipe did not fill.");
+                    previous = available;
+                    thread::sleep(Duration::from_millis(100));
+                }
+            }
             #[cfg(unix)]
             if let Some(signal) = signal {
                 assert_eq!(unsafe { libc::kill(-(child.id() as libc::pid_t), signal) }, 0);
@@ -512,6 +547,14 @@ mod tests {
             for mode in ["interrupt", "interrupt-output", "interrupt-results", "inactive"] {
                 termination_case(Some(signal), mode);
             }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn termination_cleans_up_even_when_the_output_consumer_stops_reading() {
+        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
+            termination_case(Some(signal), "blocked-output");
         }
     }
 
