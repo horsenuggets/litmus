@@ -1,4 +1,4 @@
-# Manages repository merge settings and required native checks on main and release.
+# Manages merge settings and required native and release checks on main and release.
 # Supply TF_VAR_repository_owner and GITHUB_TOKEN when planning or applying.
 
 terraform {
@@ -35,12 +35,14 @@ provider "github" {
 
 locals {
     repository_name = "litmus"
-    native_checks = [
+    main_checks = [
+        "check-release-helpers",
         "check-repository-settings",
         "native-tests-linux",
         "native-tests-macos",
         "native-tests-windows"
     ]
+    release_checks = sort(concat(local.main_checks, ["check-release-contract"]))
 }
 
 import {
@@ -107,7 +109,7 @@ resource "github_repository_ruleset" "protected" {
             strict_required_status_checks_policy = true
 
             dynamic "required_check" {
-                for_each = local.native_checks
+                for_each = each.key == "release" ? local.release_checks : local.main_checks
                 content {
                     context = required_check.value
                     integration_id = 15368

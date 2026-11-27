@@ -1,0 +1,50 @@
+name: Release / CI
+
+on:
+  pull_request:
+    branches: [release]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  check-release-contract:
+    name: check-release-contract
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Test release helpers
+        run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Validate release proposal
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PROPOSED_SHA: ${{ github.event.pull_request.head.sha }}
+          RELEASE_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          python .github/scripts/publish_release.py --inspect-tag \
+            --root . --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" \
+            > "$RUNNER_TEMP/tag.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            > "$RUNNER_TEMP/releases.json"
+          python .github/scripts/release_contract.py \
+            --root . --releases "$RUNNER_TEMP/releases.json" \
+            --title "$RELEASE_TITLE" --tag "$RUNNER_TEMP/tag.json" \
+            --proposed-tree "$(git rev-parse "$PROPOSED_SHA^{tree}")" \
+            --merge-tree "$(git rev-parse 'HEAD^{tree}')" \
+            --main-tree "$(git rev-parse 'origin/main^{tree}')"

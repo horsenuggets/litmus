@@ -44,13 +44,13 @@ run "protect_native_publication" {
 
     assert {
         condition = alltrue([
-            for ruleset in github_repository_ruleset.protected :
+            for branch, ruleset in github_repository_ruleset.protected :
             ruleset.rules[0].required_status_checks[0].strict_required_status_checks_policy && toset([
                 for check in ruleset.rules[0].required_status_checks[0].required_check : check.context
-                ]) == toset(["check-repository-settings", "native-tests-linux", "native-tests-macos", "native-tests-windows"]) && alltrue([
+                ]) == toset(concat(["check-release-helpers", "check-repository-settings", "native-tests-linux", "native-tests-macos", "native-tests-windows"], branch == "release" ? ["check-release-contract"] : [])) && alltrue([
                 for check in ruleset.rules[0].required_status_checks[0].required_check : check.integration_id == 15368
             ])
         ])
-        error_message = "Every native platform must pass on the up-to-date head through GitHub Actions."
+        error_message = "Every native and helper check must pass, with the release contract required only on release."
     }
 }
