@@ -564,7 +564,7 @@ mod tests {
         let prints = match mode.as_str() {
             "backlog-results" | "interrupt-output" | "natural-backlog-results" => 10_000,
             "blocked-output" | "timeout-output" => 1_000_000,
-            "broken-pipe" | "moved-launcher-broken-pipe" => 1,
+            "broken-pipe" | "moved-launcher-broken-pipe" | "retained-reader" => 1,
             _ => 0,
         };
         for _ in 0..prints {
@@ -574,6 +574,13 @@ mod tests {
             println!("\n{MARKER}{{\"specs\":[]}}");
             std::io::stdout().flush().unwrap();
             fs::write("reported", "").unwrap();
+        }
+        if mode == "retained-reader" {
+            let mut repeat = [0];
+            connection.read_exact(&mut repeat).unwrap();
+            assert_eq!(repeat, [2]);
+            println!("The runtime is still running.");
+            std::io::stdout().flush().unwrap();
         }
         if mode != "natural-backlog-results" {
             let _ = connection.read(&mut [0]);
@@ -817,7 +824,7 @@ mod tests {
             connection.set_nonblocking(false).unwrap();
             connection.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
             connection.read_exact(&mut [0]).unwrap();
-            if signal.is_none() && !matches!(mode, "backlog-results" | "natural-backlog-results" | "timeout-output") {
+            if signal.is_none() && !matches!(mode, "backlog-results" | "natural-backlog-results" | "retained-reader" | "timeout-output") {
                 drop(child.stdout.take());
             }
             connection.write_all(&[1]).unwrap();
@@ -826,6 +833,30 @@ mod tests {
                 thread::sleep(Duration::from_millis(10));
             }
             assert!(ready.exists(), "The termination fixture was not ready ({mode}).");
+            if mode == "retained-reader" {
+                let output = child.stdout.take().unwrap();
+                let (printed, first) = mpsc::channel();
+                let reader = thread::spawn(move || {
+                    let mut output = BufReader::new(output);
+                    loop {
+                        let mut line = String::new();
+                        assert_ne!(output.read_line(&mut line).unwrap(), 0, "The CLI closed stdout before forwarding the first line.");
+                        if line.trim_end().ends_with("The runtime is still running.") {
+                            printed.send(output).unwrap();
+                            break;
+                        }
+                    }
+                });
+                let output = first.recv_timeout(Duration::from_secs(5)).expect("The CLI did not forward the first runtime line.");
+                reader.join().unwrap();
+                assert!(child.try_wait().unwrap().is_none(), "A successful write must not stop the CLI.");
+                connection.set_nonblocking(true).unwrap();
+                assert_eq!(connection.read(&mut [0]).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+                connection.set_nonblocking(false).unwrap();
+                drop(output);
+                // A vanished reader is observable only on the next write, not retroactively.
+                connection.write_all(&[2]).unwrap();
+            }
             if matches!(mode, "blocked-output" | "timeout-output") {
                 #[cfg(unix)]
                 use std::os::fd::AsRawFd;
@@ -1004,15 +1035,46 @@ mod tests {
         termination_case(None, "backlog-results");
     }
 
+    fn isolated_broken_stdout(mode: &str) {
+        let project = TempProject::new(&format!("isolated-{mode}"));
+        project.write("isolated-mode", mode);
+        // Create the tested pipe inside a helper, beyond unrelated suite forks.
+        let mut child = fixture_command("standalone::process::tests::broken_stdout_fixture")
+            .current_dir(&project)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let status = wait_for_exit(|| child.try_wait(), Instant::now() + Duration::from_secs(20));
+        if status.is_err() {
+            let _ = child.kill();
+            let _ = wait_for_exit(|| child.try_wait(), Instant::now() + Duration::from_secs(5));
+        }
+        assert!(status.expect("The isolated stdout fixture did not finish.").success(), "The isolated stdout fixture failed ({mode}).");
+    }
+
+    #[test]
+    #[ignore = "invoked as an isolated subprocess by broken stdout tests"]
+    fn broken_stdout_fixture() {
+        let mode = fs::read_to_string("isolated-mode").unwrap();
+        assert!(matches!(mode.as_str(), "broken-pipe" | "moved-launcher-broken-pipe" | "retained-reader"));
+        termination_case(None, &mode);
+    }
+
     #[cfg(unix)]
     #[test]
     fn broken_stdout_stops_a_launcher_that_moved_to_another_group() {
-        termination_case(None, "moved-launcher-broken-pipe");
+        isolated_broken_stdout("moved-launcher-broken-pipe");
     }
 
     #[test]
     fn broken_stdout_unwinds_without_leaving_the_runtime_running() {
-        termination_case(None, "broken-pipe");
+        isolated_broken_stdout("broken-pipe");
+    }
+
+    #[test]
+    fn a_reader_that_disappears_requires_another_write_before_cleanup() {
+        isolated_broken_stdout("retained-reader");
     }
 
     fn exited() -> ExitStatus {
