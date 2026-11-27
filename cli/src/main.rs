@@ -193,11 +193,11 @@ fn main() -> ExitCode {
 
 fn dispatch(command: Command) -> ExitCode {
     let interrupt = Interrupt::default();
-    if matches!(&command, Command::Test(command) if command.backend == Backend::Standalone) {
-        if let Err(error) = interrupt.install() {
-            eprintln!("litmus: couldn't install the interrupt handler: {error}");
-            return ExitCode::from(2);
-        }
+    if matches!(&command, Command::Test(command) if command.backend == Backend::Standalone)
+        && let Err(error) = interrupt.install()
+    {
+        eprintln!("litmus: couldn't install the interrupt handler: {error}");
+        return ExitCode::from(2);
     }
 
     let outcome = command.run(&interrupt);
