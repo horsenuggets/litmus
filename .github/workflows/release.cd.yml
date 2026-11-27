@@ -1,0 +1,192 @@
+name: Release / CD
+
+on:
+  push:
+    branches: [release]
+
+permissions:
+  contents: read
+
+# Serialize publication, but never cancel a run after it has created a tag or draft.
+concurrency:
+  group: release-publication
+  cancel-in-progress: false
+
+jobs:
+  check-release-contract:
+    name: check-release-contract
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      version: ${{ steps.contract.outputs.version }}
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Test release helpers
+        run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Validate the exact triggering commit
+        id: contract
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          python .github/scripts/publish_release.py --inspect-tag \
+            --root . --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" \
+            > "$RUNNER_TEMP/tag.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            > "$RUNNER_TEMP/releases.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls?per_page=100" \
+            > "$RUNNER_TEMP/pulls.json"
+          version=$(python .github/scripts/release_contract.py \
+            --root . --releases "$RUNNER_TEMP/releases.json" \
+            --pulls "$RUNNER_TEMP/pulls.json" --repository "$GITHUB_REPOSITORY" \
+            --sha "$GITHUB_SHA" --tag "$RUNNER_TEMP/tag.json" \
+            --proposed-tree "$(git rev-parse 'HEAD^{tree}')" \
+            --main-tree "$(git rev-parse 'origin/main^{tree}')")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+  build-release:
+    name: build-release-${{ matrix.system }}
+    needs: check-release-contract
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: windows
+            runner: windows-latest
+            targets: x86_64-pc-windows-msvc
+          # One runner builds both macOS architectures.
+          - system: macos
+            runner: macos-latest
+            targets: aarch64-apple-darwin x86_64-apple-darwin
+          - system: linux
+            runner: ubuntu-latest
+            targets: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_VERSION: ${{ needs.check-release-contract.outputs.version }}
+      TARGETS: ${{ matrix.targets }}
+      SYSTEM: ${{ matrix.system }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+
+      - name: Check the source commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      # The CLI build script uses the declared Rojo tool to embed the plugin.
+      - name: Install the declared tools
+        uses: CompeyDev/setup-rokit@v0.2.1
+
+      - name: Install stable Rust and the binary targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+
+      - name: Test the native CLI
+        working-directory: cli
+        run: cargo test --locked
+
+      - name: Build the release binaries
+        working-directory: cli
+        run: |
+          set -euo pipefail
+          for target in $TARGETS; do
+            cargo build --release --locked --target "$target"
+          done
+
+      # Rokit selects the platform ZIP and finds the tool's binary at its root.
+      - name: Archive the binaries
+        run: |
+          set -euo pipefail
+          mkdir archives
+          for target in $TARGETS; do
+            archive="$GITHUB_WORKSPACE/archives/litmus-$RELEASE_VERSION-$SYSTEM-${target%%-*}.zip"
+            pushd "cli/target/$target/release"
+            if [ "$RUNNER_OS" = "Windows" ]; then
+              7z a "$archive" litmus.exe
+            else
+              zip "$archive" litmus
+            fi
+            popd
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.system }}
+          path: archives/*.zip
+          if-no-files-found: error
+
+  publish-release:
+    name: publish-release
+    needs: [check-release-contract, build-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      PYTHONDONTWRITEBYTECODE: "1"
+      RELEASE_VERSION: ${{ needs.check-release-contract.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: archives
+          merge-multiple: true
+
+      - name: Revalidate the contract and all four archives before publication
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          python .github/scripts/publish_release.py --inspect-tag \
+            --root . --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" \
+            > "$RUNNER_TEMP/tag.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            > "$RUNNER_TEMP/releases.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls?per_page=100" \
+            > "$RUNNER_TEMP/pulls.json"
+          version=$(python .github/scripts/release_contract.py \
+            --root . --releases "$RUNNER_TEMP/releases.json" \
+            --pulls "$RUNNER_TEMP/pulls.json" --repository "$GITHUB_REPOSITORY" \
+            --sha "$GITHUB_SHA" --tag "$RUNNER_TEMP/tag.json" --archives archives \
+            --proposed-tree "$(git rev-parse 'HEAD^{tree}')" \
+            --main-tree "$(git rev-parse 'origin/main^{tree}')")
+          test "$version" = "$RELEASE_VERSION"
+
+      - name: Resume exact-SHA publication without replacing verified content
+        run: |
+          python .github/scripts/publish_release.py \
+            --root . --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" \
+            --archives archives

@@ -1,0 +1,24 @@
+name: Release Helper Tests
+
+on:
+  pull_request:
+    branches: [main, release]
+
+permissions:
+  contents: read
+
+jobs:
+  check-release-helpers:
+    name: check-release-helpers
+    runs-on: ubuntu-latest
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Test release helpers without credentials
+        run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
