@@ -9,7 +9,7 @@ use process_wrap::std::{CommandWrap, KillOnDrop};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -172,7 +172,7 @@ pub fn run(project_dir: &Path, run: &[String], specs: &[String], timeout: u64, i
     let mut display = Display::new(specs.to_vec());
     let mut output_closed = false;
 
-    let mut reported = loop {
+    let reported = loop {
         if interrupt.cancelled() {
             break Ok(None);
         }
@@ -234,57 +234,34 @@ pub fn run(project_dir: &Path, run: &[String], specs: &[String], timeout: u64, i
         let mut owned = child.lock().unwrap();
         owned.stop(&shown)
     };
-    reported = collect_report(reported, || {
-        let collecting = Instant::now();
-        let collection_wait = || {
-            let accepted = accepted.lock().unwrap();
-            let drain_deadline = collection_deadline(report_deadline(deadline, &accepted), collecting);
-            poll_interval(Some(drain_deadline), Instant::now())
-        };
-        // Collect before replaying logs so output backpressure cannot hide queued results.
-        // Timely completion lifts execution expiry, not the one-second collection bound.
-        let mut pending = Vec::new();
-        while !interrupt.cancelled() {
-            let wait = collection_wait();
-            if wait.is_zero() {
-                break;
-            }
-            let message = receiver.recv_timeout(wait);
-            if collection_wait().is_zero() {
-                break;
-            }
-            match message {
-                Ok(message) => {
-                    let last = matches!(message, Message::Results(_));
-                    pending.push(message);
-                    if last {
-                        break;
-                    }
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
-            }
-        }
-        let final_report = accepted.lock().unwrap().clone();
-        for message in pending {
-            match message {
-                Message::Printed(line) => display.print(&line),
-                Message::Event(event) => display.take(event),
-                Message::Results(_) => {}
-            }
-        }
-        display.finish();
-        final_report
-    });
-    if interrupt.cancelled() {
-        reported = Err("the standalone run was interrupted".to_owned());
-    }
-    let (outcome, warning) = outcome(&shown, reported, stopped);
-    if let Some(warning) = warning {
-        eprintln!("litmus: {warning}");
-    }
-
-    outcome
+    finalize_report(
+        &shown,
+        reported,
+        stopped,
+        || {
+            let collecting = Instant::now();
+            let collection_wait = || {
+                let accepted = accepted.lock().unwrap();
+                let drain_deadline = collection_deadline(report_deadline(deadline, &accepted), collecting);
+                poll_interval(Some(drain_deadline), Instant::now())
+            };
+            // Timely completion lifts execution expiry, not the one-second collection bound.
+            let _ = collect_and_replay(
+                &receiver,
+                collection_wait,
+                || interrupt.cancelled(),
+                |message| match message {
+                    Message::Printed(line) => display.print(&line),
+                    Message::Event(event) => display.take(event),
+                    Message::Results(_) => unreachable!("Collected results are returned, not forwarded."),
+                },
+            );
+            display.finish();
+            accepted.lock().unwrap().clone()
+        },
+        || interrupt.cancelled(),
+        |warning| eprintln!("litmus: {warning}"),
+    )
 }
 
 fn launcher_exited(child: &mut std::process::Child) -> std::io::Result<bool> {
@@ -316,6 +293,44 @@ fn only_zombie_launcher(launcher: &mut std::process::Child) -> bool {
         proc_listpgrppids(launcher.id() as libc::pid_t, members.as_mut_ptr().cast(), std::mem::size_of_val(&members) as libc::c_int)
     };
     count == 1 && members[0] == launcher.id() as libc::pid_t
+}
+
+fn collect_and_replay(
+    receiver: &Receiver<Message>,
+    mut wait: impl FnMut() -> Duration,
+    mut cancelled: impl FnMut() -> bool,
+    mut forward: impl FnMut(Message),
+) -> Option<String> {
+    // Collect before replaying logs so output backpressure cannot hide queued results.
+    let mut pending = Vec::new();
+    while !cancelled() {
+        let duration = wait();
+        if duration.is_zero() {
+            break;
+        }
+        let message = receiver.recv_timeout(duration);
+        if wait().is_zero() {
+            break;
+        }
+        match message {
+            Ok(message) => {
+                let last = matches!(message, Message::Results(_));
+                pending.push(message);
+                if last {
+                    break;
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    for message in pending {
+        match message {
+            Message::Results(results) => return Some(results),
+            message => forward(message),
+        }
+    }
+    None
 }
 
 fn stop_owned(mut child: Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Result<ExitStatus, String> {
@@ -403,6 +418,25 @@ fn wait_for_exit(
         }
         thread::sleep(wait);
     }
+}
+
+fn finalize_report(
+    shown: &str,
+    reported: Result<Option<String>, String>,
+    stopped: Result<ExitStatus, String>,
+    collect: impl FnOnce() -> Option<String>,
+    cancelled: impl FnOnce() -> bool,
+    emit_warning: impl FnOnce(&str),
+) -> Result<String, String> {
+    let mut reported = collect_report(reported, collect);
+    if cancelled() {
+        reported = Err("the standalone run was interrupted".to_owned());
+    }
+    let (outcome, warning) = outcome(shown, reported, stopped);
+    if let Some(warning) = warning {
+        emit_warning(&warning);
+    }
+    outcome
 }
 
 fn collect_report(reported: Result<Option<String>, String>, collect: impl FnOnce() -> Option<String>) -> Result<Option<String>, String> {
@@ -519,6 +553,242 @@ mod tests {
         });
 
         assert_eq!(passed, 1);
+    }
+
+    #[test]
+    fn collects_through_results_before_forwarding_any_queued_output() {
+        let (sender, receiver) = mpsc::channel();
+        for message in [
+            printed("first"),
+            Message::Event(Event::Loading { spec: 1 }),
+            printed("second"),
+            printed("second"),
+            Message::Event(Event::Settled),
+            Message::Results("{\"specs\":[]}".to_owned()),
+        ] {
+            sender.send(message).unwrap();
+        }
+        let mut forwarded = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(60);
+
+        let results = collect_and_replay(
+            &receiver,
+            || poll_interval(Some(deadline), Instant::now()),
+            || false,
+            |message| {
+                // Even the first callback must see that collection reached the results.
+                assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
+                forwarded.push(message);
+            },
+        );
+
+        assert_eq!(results.as_deref(), Some("{\"specs\":[]}"));
+        assert_eq!(
+            forwarded,
+            [printed("first"), Message::Event(Event::Loading { spec: 1 }), printed("second"), printed("second"), Message::Event(Event::Settled)]
+        );
+    }
+
+    #[test]
+    fn returns_the_first_results_without_consuming_later_queued_messages() {
+        let (sender, receiver) = mpsc::channel();
+        for message in [
+            printed("before"),
+            Message::Results("first results".to_owned()),
+            printed("after"),
+            Message::Event(Event::Settled),
+            Message::Results("later results".to_owned()),
+        ] {
+            sender.send(message).unwrap();
+        }
+        let mut forwarded = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(60);
+
+        let results = collect_and_replay(
+            &receiver,
+            || poll_interval(Some(deadline), Instant::now()),
+            || false,
+            |message| forwarded.push(message),
+        );
+
+        assert_eq!(results.as_deref(), Some("first results"));
+        assert_eq!(forwarded, [printed("before")]);
+        assert_eq!(
+            receiver.try_iter().collect::<Vec<_>>(),
+            [printed("after"), Message::Event(Event::Settled), Message::Results("later results".to_owned())]
+        );
+    }
+
+    #[test]
+    fn replays_collected_output_when_the_channel_disconnects_without_results() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(printed("first")).unwrap();
+        sender.send(Message::Event(Event::Settled)).unwrap();
+        drop(sender);
+        let mut forwarded = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(60);
+
+        let results = collect_and_replay(
+            &receiver,
+            || poll_interval(Some(deadline), Instant::now()),
+            || false,
+            |message| forwarded.push(message),
+        );
+
+        assert_eq!(results, None);
+        assert_eq!(forwarded, [printed("first"), Message::Event(Event::Settled)]);
+        assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+    }
+
+    #[test]
+    fn an_expired_collection_deadline_leaves_queued_results_untouched() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Message::Results("queued results".to_owned())).unwrap();
+
+        let results = collect_and_replay(
+            &receiver,
+            || Duration::ZERO,
+            || false,
+            |_| panic!("Expired collection must not forward output."),
+        );
+
+        assert_eq!(results, None);
+        assert_eq!(receiver.try_recv(), Ok(Message::Results("queued results".to_owned())));
+    }
+
+    #[test]
+    fn rejects_results_received_when_the_collection_deadline_expires() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Message::Results("late results".to_owned())).unwrap();
+        let mut before_receive = true;
+
+        let report = collect_and_replay(
+            &receiver,
+            || {
+                if before_receive {
+                    before_receive = false;
+                    TICK
+                } else {
+                    Duration::ZERO
+                }
+            },
+            || false,
+            |_| panic!("Expired collection must not forward output."),
+        );
+
+        assert_eq!(report, None);
+        assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
+    }
+
+    #[test]
+    fn cancellation_stops_collection_but_replays_already_collected_output() {
+        for collect_count in [0, 2] {
+            let (sender, receiver) = mpsc::channel();
+            sender.send(printed("first")).unwrap();
+            sender.send(Message::Event(Event::Settled)).unwrap();
+            sender.send(Message::Results("queued results".to_owned())).unwrap();
+            let mut checked = 0;
+            let mut forwarded = Vec::new();
+            let deadline = Instant::now() + Duration::from_secs(60);
+
+            let results = collect_and_replay(
+                &receiver,
+                || poll_interval(Some(deadline), Instant::now()),
+                || {
+                    checked += 1;
+                    checked > collect_count
+                },
+                |message| forwarded.push(message),
+            );
+
+            assert_eq!(results, None);
+            if collect_count == 0 {
+                assert!(forwarded.is_empty());
+                assert_eq!(receiver.try_recv(), Ok(printed("first")));
+                assert_eq!(receiver.try_recv(), Ok(Message::Event(Event::Settled)));
+            } else {
+                assert_eq!(forwarded, [printed("first"), Message::Event(Event::Settled)]);
+            }
+            assert_eq!(receiver.try_recv(), Ok(Message::Results("queued results".to_owned())));
+            assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
+        }
+    }
+
+    #[test]
+    fn retains_results_received_during_final_collection() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Message::Results("{\"specs\":[]}".to_owned())).unwrap();
+        drop(sender);
+        let now = Instant::now();
+
+        let report = collect_and_replay(
+            &receiver,
+            || poll_interval(Some(now + Duration::from_secs(1)), now),
+            || false,
+            |_| panic!("Results must be returned, not forwarded."),
+        );
+
+        assert_eq!(report.as_deref(), Some("{\"specs\":[]}"));
+    }
+
+    #[test]
+    fn elapsed_deadline_stops_final_collection_with_messages_always_queued() {
+        for initially_elapsed in [false, true] {
+            let (sender, receiver) = mpsc::channel();
+            sender.send(printed("first")).unwrap();
+            sender.send(printed("second")).unwrap();
+            sender.send(Message::Results("too late".to_owned())).unwrap();
+            drop(sender);
+            let start = Instant::now();
+            let deadline = start + Duration::from_secs(1);
+            let mut checked = 0;
+            let mut forwarded = Vec::new();
+
+            let report = collect_and_replay(
+                &receiver,
+                || {
+                    checked += 1;
+                    // The first receive needs both its pre-receive and post-receive checks.
+                    let now = if !initially_elapsed && checked <= 2 { start } else { deadline };
+                    poll_interval(Some(deadline), now)
+                },
+                || false,
+                |message| forwarded.push(message),
+            );
+
+            assert_eq!(report, None);
+            if initially_elapsed {
+                assert!(forwarded.is_empty());
+                assert_eq!(receiver.try_recv().unwrap(), printed("first"));
+            } else {
+                assert_eq!(forwarded, [printed("first")]);
+            }
+            assert_eq!(receiver.try_recv().unwrap(), printed("second"));
+            assert_eq!(receiver.try_recv().unwrap(), Message::Results("too late".to_owned()));
+        }
+    }
+
+    #[test]
+    fn final_collection_with_an_open_idle_sender_finishes_at_its_deadline() {
+        let (sender, receiver) = mpsc::channel();
+        let (finished, completion) = mpsc::channel();
+        let collector = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_millis(20);
+            let report = collect_and_replay(
+                &receiver,
+                || poll_interval(Some(deadline), Instant::now()),
+                || false,
+                |_| panic!("The open sender has no data."),
+            );
+            finished.send((report, Instant::now() >= deadline)).unwrap();
+        });
+
+        let (report, elapsed) = completion.recv_timeout(Duration::from_secs(5)).expect("The idle collector did not finish.");
+        // Keep the sender open until collection completes, rather than testing disconnection.
+        drop(sender);
+        collector.join().unwrap();
+        assert_eq!(report, None);
+        assert!(elapsed, "Collection must wait for the future deadline.");
     }
 
     fn fixture_command(name: &str) -> Command {
@@ -723,6 +993,63 @@ mod tests {
         assert_eq!(refused.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
+    #[test]
+    fn cleanup_waits_poll_until_a_pending_launcher_exits() {
+        let expected = exited();
+        let mut observations = [None, None, Some(expected)].into_iter();
+        let guard = Instant::now() + Duration::from_secs(5);
+        let status = wait_for_exit(
+            || {
+                assert!(Instant::now() < guard, "Polling did not finish before the bounded guard.");
+                Ok(observations.next().expect("Polling continued after the launcher exited."))
+            },
+            guard,
+        )
+        .unwrap();
+
+        assert_eq!(status, expected);
+        assert_eq!(observations.next(), None, "The launcher exit must be observed after the pending polls.");
+    }
+
+    #[test]
+    fn cleanup_waits_propagate_an_error_after_pending_polls() {
+        let expected = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "The delayed poll failed.");
+        let mut observations = [Ok(None), Ok(None), Err(expected)].into_iter();
+        let guard = Instant::now() + Duration::from_secs(5);
+        let problem = wait_for_exit(
+            || {
+                assert!(Instant::now() < guard, "Polling did not finish before the bounded guard.");
+                observations.next().expect("Polling continued after the launcher observation failed.")
+            },
+            guard,
+        )
+        .unwrap_err();
+
+        assert_eq!(problem.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(problem.to_string(), "The delayed poll failed.");
+        assert!(observations.next().is_none(), "The delayed error must be observed after the pending polls.");
+    }
+
+    #[test]
+    fn cleanup_waits_time_out_when_a_launcher_remains_pending_until_a_future_deadline() {
+        let started = Instant::now();
+        let deadline = started + TICK * 2;
+        let guard = started + Duration::from_secs(5);
+        let problem = wait_for_exit(
+            || {
+                assert!(Instant::now() < guard, "Polling ignored the cleanup deadline.");
+                Ok(None)
+            },
+            deadline,
+        )
+        .unwrap_err();
+
+        assert_eq!(problem.kind(), std::io::ErrorKind::TimedOut);
+        let finished = Instant::now();
+        assert!(finished >= deadline, "Cleanup timed out before the future deadline.");
+        assert!(finished < guard, "Cleanup exceeded the bounded guard.");
+    }
+
     #[cfg(unix)]
     fn with_native_child(mut child: std::process::Child, test: impl FnOnce(&mut std::process::Child)) {
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -755,10 +1082,14 @@ mod tests {
                 assert!(Instant::now() < deadline, "The launcher did not exit.");
                 thread::sleep(Duration::from_millis(10));
             }
+            let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+            // Bypass Child's cached status to prove that polling left the PID unreaped.
+            // WNOWAIT also leaves with_native_child responsible for the final reap.
+            let result = unsafe { libc::waitid(libc::P_PID, child.id(), &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
+            assert_eq!(result, 0, "The unreaped launcher could not be observed ({}).", std::io::Error::last_os_error());
+            assert_eq!(unsafe { info.si_pid() }, child.id() as libc::pid_t, "Polling must leave the exited launcher waitable.");
             #[cfg(target_os = "macos")]
             assert!(only_zombie_launcher(child), "The reserved zombie must not be mistaken for a live process tree.");
-            // A second native wait must still find the zombie, rather than ECHILD.
-            // Use the native child so its cached status also makes failure cleanup safe.
             assert!(child.try_wait().unwrap().expect("Polling reaped the process-group leader early.").success());
         });
     }
@@ -770,6 +1101,28 @@ mod tests {
 
         let child = Command::new("sh").args(["-c", "exec sleep 60"]).process_group(0).spawn().unwrap();
         with_native_child(child, |child| assert!(!only_zombie_launcher(child)));
+    }
+
+    #[test]
+    fn owned_cleanup_caches_its_first_real_stop_and_releases_the_child() {
+        // The native harness help command is self-contained, spawns no descendants,
+        // and exits on its own even if cleanup regresses.
+        let mut command = CommandWrap::with_new(std::env::current_exe().unwrap(), |command| {
+            command.arg("--help").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        });
+        #[cfg(unix)]
+        command.wrap(ProcessGroup::leader());
+        #[cfg(windows)]
+        command.wrap(JobObject);
+        command.wrap(KillOnDrop);
+        let mut owned = OwnedChild { child: Some(command.spawn().unwrap()), stopped: None };
+
+        let first = owned.stop("the owned native fixture");
+
+        assert!(first.is_ok(), "The first real cleanup failed ({first:?}).");
+        assert_eq!(owned.stopped.as_ref(), Some(&first), "The first cleanup outcome must be cached.");
+        assert!(owned.child.is_none(), "The first cleanup must take ownership of the child.");
+        assert_eq!(owned.stop("the fixture without a child"), first);
     }
 
     #[test]
@@ -1197,6 +1550,121 @@ mod tests {
         use std::os::windows::process::ExitStatusExt;
 
         ExitStatus::from_raw(0)
+    }
+
+    #[test]
+    fn finalization_keeps_queued_results_and_emits_the_exact_cleanup_warning() {
+        let payload = "{\"specs\":[]}";
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Message::Results(payload.to_owned())).unwrap();
+        drop(sender);
+        let mut warnings = Vec::new();
+
+        let result = finalize_report(
+            "lune run",
+            Ok(None),
+            Err("couldn't stop it".to_owned()),
+            || match receiver.try_recv().unwrap() {
+                Message::Results(results) => Some(results),
+                message => panic!("Expected queued results, got {message:?}."),
+            },
+            || false,
+            |warning| warnings.push(warning.to_owned()),
+        );
+
+        assert_eq!(result, Ok(payload.to_owned()));
+        assert_eq!(warnings, ["couldn't stop it"]);
+    }
+
+    #[test]
+    fn finalization_obeys_the_reporting_and_cleanup_truth_table() {
+        let payload = "{\"specs\":[]}";
+        for reported in [Ok(None), Ok(Some("accepted results".to_owned())), Err("it timed out".to_owned())] {
+            for queued in [false, true] {
+                for cleanup_succeeded in [false, true] {
+                    let (sender, receiver) = mpsc::channel();
+                    if queued {
+                        sender.send(Message::Results(payload.to_owned())).unwrap();
+                    }
+                    drop(sender);
+                    let mut collected = false;
+                    let mut warnings = Vec::new();
+                    let stopped = if cleanup_succeeded { Ok(exited()) } else { Err("couldn't stop it".to_owned()) };
+                    let result = finalize_report(
+                        "lune run",
+                        reported.clone(),
+                        stopped,
+                        || {
+                            collected = true;
+                            receiver.try_recv().ok().map(|message| match message {
+                                Message::Results(results) => results,
+                                message => panic!("Expected queued results, got {message:?}."),
+                            })
+                        },
+                        || false,
+                        |warning| warnings.push(warning.to_owned()),
+                    );
+                    let expected = match (&reported, queued, cleanup_succeeded) {
+                        (Ok(Some(results)), _, true) => (Ok(results.clone()), vec![]),
+                        (Ok(Some(results)), _, false) => (Ok(results.clone()), vec!["couldn't stop it".to_owned()]),
+                        (Ok(None), true, true) => (Ok(payload.to_owned()), vec![]),
+                        (Ok(None), true, false) => (Ok(payload.to_owned()), vec!["couldn't stop it".to_owned()]),
+                        (Ok(None), false, true) => {
+                            (Err(format!("`lune run` ended without reporting any results ({})", exited())), vec![])
+                        }
+                        (Ok(None), false, false) => {
+                            (Err("`lune run` ended without reporting any results, and couldn't stop it".to_owned()), vec![])
+                        }
+                        (Err(problem), _, true) => (Err(problem.clone()), vec![]),
+                        (Err(problem), _, false) => (Err(format!("{problem}, and couldn't stop it")), vec![]),
+                    };
+
+                    assert_eq!(collected, reported.is_ok(), "{reported:?}, {queued}, {cleanup_succeeded}");
+                    assert_eq!((result, warnings), expected, "{reported:?}, {queued}, {cleanup_succeeded}");
+                    let remaining = if reported.is_err() && queued { vec![Message::Results(payload.to_owned())] } else { vec![] };
+                    assert_eq!(receiver.try_iter().collect::<Vec<_>>(), remaining);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn finalization_cancellation_during_collection_overrides_queued_and_accepted_results() {
+        let payload = "{\"specs\":[]}";
+        for accepted in [None, Some("accepted results".to_owned())] {
+            for cleanup_succeeded in [false, true] {
+                let (sender, receiver) = mpsc::channel();
+                sender.send(Message::Results(payload.to_owned())).unwrap();
+                drop(sender);
+                let cancelled = std::cell::Cell::new(false);
+                let mut warnings = Vec::new();
+                let stopped = if cleanup_succeeded { Ok(exited()) } else { Err("couldn't stop it".to_owned()) };
+                let result = finalize_report(
+                    "lune run",
+                    Ok(accepted.clone()),
+                    stopped,
+                    || {
+                        assert!(!cancelled.get());
+                        let Message::Results(results) = receiver.try_recv().unwrap() else {
+                            panic!("Expected queued results.");
+                        };
+                        cancelled.set(true);
+                        Some(results)
+                    },
+                    || cancelled.get(),
+                    |warning| warnings.push(warning.to_owned()),
+                );
+                let expected = if cleanup_succeeded {
+                    "the standalone run was interrupted"
+                } else {
+                    "the standalone run was interrupted, and couldn't stop it"
+                };
+
+                assert!(cancelled.get(), "Collection must run before checking cancellation.");
+                assert_eq!(result, Err(expected.to_owned()), "{accepted:?}, {cleanup_succeeded}");
+                assert!(warnings.is_empty(), "Cancellation must not emit a results-success warning.");
+            }
+        }
     }
 
     #[test]
