@@ -324,7 +324,7 @@ fn outcome(
 
 fn in_words(duration: Duration) -> String {
     let seconds = duration.as_secs();
-    let (count, unit) = if seconds >= 60 && seconds % 60 == 0 { (seconds / 60, "minute") } else { (seconds, "second") };
+    let (count, unit) = if seconds >= 60 && seconds.is_multiple_of(60) { (seconds / 60, "minute") } else { (seconds, "second") };
 
     format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
 }
