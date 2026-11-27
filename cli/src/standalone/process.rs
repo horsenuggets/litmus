@@ -14,7 +14,17 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(all(test, windows))]
+mod windows_tests;
+
+#[cfg(target_os = "macos")]
+#[link(name = "proc")]
+unsafe extern "C" {
+    fn proc_listpgrppids(group: libc::pid_t, buffer: *mut std::ffi::c_void, size: libc::c_int) -> libc::c_int;
+}
+
 const BUDGET: Duration = Duration::from_secs(300);
+const CLEANUP_BUDGET: Duration = Duration::from_secs(1);
 const TICK: Duration = Duration::from_millis(100);
 
 #[derive(Debug, PartialEq)]
@@ -22,6 +32,30 @@ enum Message {
     Printed(String),
     Event(Event),
     Results(String),
+}
+
+struct OwnedChild {
+    child: Option<Box<dyn process_wrap::std::ChildWrapper>>,
+    stopped: Option<Result<ExitStatus, String>>,
+}
+
+impl OwnedChild {
+    fn stop(&mut self, shown: &str) -> Result<ExitStatus, String> {
+        if let Some(stopped) = &self.stopped {
+            return stopped.clone();
+        }
+        let stopped = stop_owned(self.child.take().expect("The run still owns its child."), shown);
+        self.stopped = Some(stopped.clone());
+        stopped
+    }
+}
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        if let Some(child) = self.child.take() {
+            let _ = stop_owned(child, "the standalone runtime");
+        }
+    }
 }
 
 pub fn run(project_dir: &Path, run: &[String], specs: &[String], interrupt: &Interrupt) -> Result<String, String> {
@@ -52,15 +86,13 @@ fn run_with_budget(
         format!("couldn't start `{shown}`, which begins with what litmus.toml gives as `run` under [standalone]: {error}")
     })?;
     let output = child.stdout().take().expect("The runtime stdout was piped.");
-    let child = Arc::new(Mutex::new(Some(child)));
+    let child = Arc::new(Mutex::new(OwnedChild { child: Some(child), stopped: None }));
     let owned = Arc::downgrade(&child);
     let interrupted_command = shown.clone();
     interrupt.on_signal(move |signal| {
         if let Some(owned) = owned.upgrade() {
             let mut owned = owned.lock().unwrap();
-            if let Some(child) = owned.take() {
-                let _ = stop_owned(child, &interrupted_command);
-            }
+            let _ = owned.stop(&interrupted_command);
             // Hold ownership until termination so the output thread cannot race cleanup.
             crate::interrupt::terminate(signal);
         }
@@ -90,17 +122,16 @@ fn run_with_budget(
         }
 
         // Poll the launcher, not the group or job. Descendants can keep stdout open.
-        // SAFETY: Only its cached exit status changes. Ownership wrappers keep their
-        // handles and delegate their final wait to this same native child.
         let launcher_status = {
             let mut owned = child.lock().unwrap();
-            let child = owned.as_mut().expect("The run still owns its child.");
+            let child = owned.child.as_mut().expect("The run still owns its child.");
+            // SAFETY: Polling preserves the native child and ownership handles.
             let launcher = unsafe { child.try_inner_child_mut() }.expect("The command has a native child.");
-            launcher.try_wait()
+            launcher_exited(launcher)
         };
         match launcher_status {
-            Ok(Some(_)) => break Ok(None),
-            Ok(None) => {}
+            Ok(true) => break Ok(None),
+            Ok(false) => {}
             Err(error) => break Err(format!("couldn't tell how `{shown}` ended: {error}")),
         }
 
@@ -115,7 +146,7 @@ fn run_with_budget(
 
     let stopped = {
         let mut owned = child.lock().unwrap();
-        stop_owned(owned.take().expect("The run still owns its child."), &shown)
+        owned.stop(&shown)
     };
     if stopped.is_ok() {
         let drain_deadline = Instant::now() + Duration::from_secs(1);
@@ -156,42 +187,122 @@ fn run_with_budget(
     outcome
 }
 
+fn launcher_exited(child: &mut std::process::Child) -> std::io::Result<bool> {
+    #[cfg(unix)]
+    {
+        // Keep an exited group leader unreaped so its numeric PGID cannot be reused.
+        let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+        let result = unsafe { libc::waitid(libc::P_PID, child.id(), &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
+        if result == -1 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(unsafe { info.si_pid() } != 0)
+        }
+    }
+    #[cfg(windows)]
+    child.try_wait().map(|status| status.is_some())
+}
+
+#[cfg(target_os = "macos")]
+fn only_zombie_launcher(launcher: &mut std::process::Child) -> bool {
+    if !matches!(launcher_exited(launcher), Ok(true)) {
+        return false;
+    }
+    // Two slots distinguish the reserved leader from any other group member. Unknown
+    // or truncated observations must not suppress a genuine permission failure.
+    let mut members: [libc::pid_t; 2] = [0; 2];
+    // SAFETY: The buffer is writable and sized in bytes; the leader remains unreaped.
+    let count = unsafe {
+        proc_listpgrppids(launcher.id() as libc::pid_t, members.as_mut_ptr().cast(), std::mem::size_of_val(&members) as libc::c_int)
+    };
+    count == 1 && members[0] == launcher.id() as libc::pid_t
+}
+
 fn stop_owned(mut child: Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Result<ExitStatus, String> {
     let stopped = stop(&mut child, shown);
-    if stopped.is_ok() {
-        // Disarm the outer drop guard once its group/job has been stopped and reaped.
-        drop(child.into_inner());
-    }
+    // The bounded cleanup already attempted both owners. Never enter the wrapper's
+    // unbounded kill-and-wait again, or signal a PGID after reaping its launcher.
+    drop(child.into_inner());
     stopped
 }
 
 // Stops the owned process group or job, then reaps the launcher.
 fn stop(child: &mut Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Result<ExitStatus, String> {
     #[cfg(unix)]
-    let stop_deadline = Instant::now() + Duration::from_secs(1);
+    let stop_deadline = Instant::now() + CLEANUP_BUDGET;
+    #[cfg(unix)]
     let stopped = loop {
         match child.start_kill() {
-            #[cfg(unix)]
+            #[cfg(target_os = "macos")]
+            Err(error) if error.raw_os_error() == Some(libc::EPERM) && {
+                // macOS rejects signals to a zombie-only group. Its reserved leader
+                // and an authoritative membership query distinguish that from denial.
+                let launcher = unsafe { child.try_inner_child_mut() }.expect("The command has a native child.");
+                only_zombie_launcher(launcher)
+            } => break Ok(()),
             Err(error) if error.raw_os_error() == Some(libc::EPERM) && Instant::now() < stop_deadline => {
-                // macOS can reject a signal while a launcher is exiting. Reap it before
-                // retrying, without suppressing a persistent permission error.
-                child.try_wait().map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))?;
+                // Keep the leader reserved through retries, even if macOS rejects the
+                // signal while it exits. Persistent permission errors remain visible.
                 thread::sleep(TICK);
             }
             result => break result,
         }
     };
-    if let Err(error) = stopped {
+    #[cfg(windows)]
+    let stopped = child.start_kill();
+    let tree_problem = match stopped {
+        Ok(()) => None,
         #[cfg(unix)]
-        let already_gone = error.raw_os_error() == Some(libc::ESRCH);
-        #[cfg(not(unix))]
-        let already_gone = false;
-        if !already_gone {
-            return Err(format!("couldn't stop the process tree for `{shown}`, so it may still be running: {error}"));
-        }
-    }
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => None,
+        Err(error) => Some(format!("couldn't stop the process tree for `{shown}`, so it may still be running: {error}")),
+    };
 
-    child.wait().map_err(|error| format!("couldn't tell how `{shown}` ended: {error}"))
+    // A launcher can leave its original group. Its native child remains ours, so
+    // terminate it independently before any wait can release its numeric identity.
+    let native_error = {
+        // SAFETY: The wrapper keeps this native child and all ownership handles alive.
+        let launcher = unsafe { child.try_inner_child_mut() }.expect("The command has a native child.");
+        launcher.kill().err()
+    };
+    let status = wait_for_exit(
+        || {
+            #[cfg(unix)]
+            {
+                // Group polling can miss a launcher that moved groups. No more group
+                // signals follow this native reap, so PID reuse is harmless here.
+                let launcher = unsafe { child.try_inner_child_mut() }.expect("The command has a native child.");
+                launcher.try_wait()
+            }
+            #[cfg(windows)]
+            child.try_wait()
+        },
+        Instant::now() + CLEANUP_BUDGET,
+    )
+    .map_err(|error| match native_error {
+        Some(kill) => format!("couldn't stop or reap the launcher for `{shown}`, so it may still be running ({kill}; {error})"),
+        None => format!("couldn't reap the launcher for `{shown}` before cleanup ended, so it may still be running: {error}"),
+    });
+    match (tree_problem, status) {
+        (Some(problem), Err(wait)) => Err(format!("{problem}, and {wait}")),
+        (Some(problem), Ok(_)) => Err(problem),
+        (None, status) => status,
+    }
+}
+
+fn wait_for_exit(
+    mut poll: impl FnMut() -> std::io::Result<Option<ExitStatus>>,
+    deadline: Instant,
+) -> std::io::Result<ExitStatus> {
+    loop {
+        if let Some(status) = poll()? {
+            return Ok(status);
+        }
+        let wait = deadline.saturating_duration_since(Instant::now()).min(TICK);
+        if wait.is_zero() {
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "Cleanup could not confirm process termination."));
+        }
+        thread::sleep(wait);
+    }
 }
 
 // What the run comes to. Results the runtime reported still count when stopping it then
@@ -323,8 +434,18 @@ mod tests {
 
     #[test]
     #[ignore = "invoked as a subprocess by process cleanup tests"]
+    #[allow(clippy::zombie_processes, reason = "This launcher must exit before its descendant to exercise cleanup.")]
     fn wrapper_fixture() {
+        #[cfg(windows)]
+        super::windows_tests::ignore_ctrl_c(true);
         let mode = fs::read_to_string("mode").unwrap();
+        #[cfg(unix)]
+        if matches!(mode.as_str(), "moved-launcher" | "moved-launcher-broken-pipe") {
+            let group = fs::read_to_string("parent-group").unwrap().parse::<libc::pid_t>().unwrap();
+            assert_eq!(unsafe { libc::setpgid(0, group) }, 0);
+            descendant_fixture();
+            return;
+        }
         let mut child = fixture_command("standalone::process::tests::descendant_fixture").spawn().unwrap();
         if matches!(mode.as_str(), "backlog-results" | "escaped" | "missing" | "exited-results") {
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -370,7 +491,7 @@ mod tests {
         let prints = match mode.as_str() {
             "backlog-results" | "interrupt-output" => 10_000,
             "blocked-output" => 1_000_000,
-            "broken-pipe" => 1,
+            "broken-pipe" | "moved-launcher-broken-pipe" | "retained-reader" => 1,
             _ => 0,
         };
         for _ in 0..prints {
@@ -380,6 +501,13 @@ mod tests {
             println!("\n{MARKER}{{\"specs\":[]}}");
             std::io::stdout().flush().unwrap();
             fs::write("reported", "").unwrap();
+        }
+        if mode == "retained-reader" {
+            let mut repeat = [0];
+            connection.read_exact(&mut repeat).unwrap();
+            assert_eq!(repeat, [2]);
+            println!("The runtime is still running.");
+            std::io::stdout().flush().unwrap();
         }
         let _ = connection.read(&mut [0]);
     }
@@ -401,6 +529,10 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         project.write("address", &listener.local_addr().unwrap().to_string());
         project.write("mode", mode);
+        #[cfg(unix)]
+        if mode == "moved-launcher" {
+            project.write("parent-group", &unsafe { libc::getpgrp() }.to_string());
+        }
         let command = wrapper_run();
         thread::scope(|scope| {
             let (finished, completion) = mpsc::sync_channel(1);
@@ -455,6 +587,74 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_waits_return_a_status_or_a_bounded_error() {
+        let deadline = Instant::now();
+        assert!(wait_for_exit(|| Ok(Some(exited())), deadline).unwrap().success());
+        let pending = wait_for_exit(|| Ok(None), deadline).unwrap_err();
+        assert_eq!(pending.kind(), std::io::ErrorKind::TimedOut);
+        let refused = wait_for_exit(|| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)), deadline).unwrap_err();
+        assert_eq!(refused.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[cfg(unix)]
+    fn with_native_child(mut child: std::process::Child, test: impl FnOnce(&mut std::process::Child)) {
+        use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+
+        let outcome = catch_unwind(AssertUnwindSafe(|| test(&mut child)));
+        let reaped = match child.try_wait() {
+            Ok(Some(status)) => Ok(status),
+            Ok(None) => {
+                let _ = child.kill();
+                wait_for_exit(|| child.try_wait(), Instant::now() + Duration::from_secs(5))
+            }
+            // If a regression reaped the child early, its PID is no longer ours to kill.
+            Err(error) => Err(error),
+        };
+        if let Err(problem) = outcome {
+            resume_unwind(problem);
+        }
+        reaped.expect("The native child fixture could not be reaped.");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn launcher_polling_keeps_its_process_group_identifier_reserved_until_cleanup() {
+        use std::os::unix::process::CommandExt;
+
+        let child = Command::new("sh").args(["-c", "exit 0"]).process_group(0).spawn().unwrap();
+        with_native_child(child, |child| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !launcher_exited(child).unwrap() {
+                assert!(Instant::now() < deadline, "The launcher did not exit.");
+                thread::sleep(Duration::from_millis(10));
+            }
+            #[cfg(target_os = "macos")]
+            assert!(only_zombie_launcher(child), "The reserved zombie must not be mistaken for a live process tree.");
+            // A second native wait must still find the zombie, rather than ECHILD.
+            // Use the native child so its cached status also makes failure cleanup safe.
+            assert!(child.try_wait().unwrap().expect("Polling reaped the process-group leader early.").success());
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_live_launcher_is_not_a_zombie_only_group() {
+        use std::os::unix::process::CommandExt;
+
+        let child = Command::new("sh").args(["-c", "exec sleep 60"]).process_group(0).spawn().unwrap();
+        with_native_child(child, |child| assert!(!only_zombie_launcher(child)));
+    }
+
+    #[test]
+    fn owned_cleanup_retains_its_first_outcome() {
+        for stopped in [Ok(exited()), Err("The cleanup attempt failed.".to_owned())] {
+            let mut owned = OwnedChild { child: None, stopped: Some(stopped.clone()) };
+            assert_eq!(owned.stop("the already stopped fixture"), stopped);
+            assert_eq!(owned.stop("the same fixture again"), stopped);
+        }
+    }
+
+    #[test]
     fn reported_results_stop_the_wrapper_and_runtime() {
         assert_eq!(cleaned_up("results").unwrap(), "{\"specs\":[]}");
     }
@@ -476,6 +676,12 @@ mod tests {
         assert!(cleaned_up("timeout").unwrap_err().contains("was stopped, still running"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_launcher_that_changes_groups_is_still_stopped_and_reaped() {
+        assert!(cleaned_up("moved-launcher").unwrap_err().contains("was stopped, still running"));
+    }
+
     #[test]
     fn missing_results_stop_a_runtime_after_its_wrapper_exits() {
         let problem = cleaned_up("missing").unwrap_err();
@@ -486,16 +692,21 @@ mod tests {
     #[test]
     #[ignore = "invoked as a subprocess by termination tests"]
     fn interrupt_fixture() -> std::process::ExitCode {
+        let mode = fs::read_to_string("mode").unwrap();
+        #[cfg(windows)]
+        if matches!(mode.as_str(), "interrupt" | "interrupt-output" | "interrupt-results" | "inactive" | "blocked-output") {
+            super::windows_tests::ignore_ctrl_c(false);
+        }
         let command = crate::Command::parse(&["test", "--standalone"]).unwrap();
         let outcome = crate::dispatch(command);
-        if fs::read_to_string("mode").unwrap() == "inactive" {
+        if mode == "inactive" {
             fs::write("finished", "").unwrap();
             thread::sleep(Duration::from_secs(10));
         }
         outcome
     }
 
-    fn termination_case(signal: Option<i32>, mode: &str) {
+    pub(super) fn termination_case(signal: Option<i32>, mode: &str) {
         #[cfg(unix)]
         use std::os::unix::process::{CommandExt, ExitStatusExt};
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -505,6 +716,10 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         project.write("address", &listener.local_addr().unwrap().to_string());
         project.write("mode", mode);
+        #[cfg(unix)]
+        if mode == "moved-launcher-broken-pipe" {
+            project.write("parent-group", &unsafe { libc::getpgrp() }.to_string());
+        }
         project.write("tests/a.spec.luau", "");
         project.write(
             "litmus.toml",
@@ -513,6 +728,10 @@ mod tests {
         let mut command = fixture_command("standalone::process::tests::interrupt_fixture");
         #[cfg(unix)]
         command.process_group(0);
+        #[cfg(windows)]
+        if signal.is_some() {
+            super::windows_tests::new_console(&mut command);
+        }
         let mut child = command
             .current_dir(&project)
             .stdin(Stdio::null())
@@ -537,7 +756,7 @@ mod tests {
             connection.set_nonblocking(false).unwrap();
             connection.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
             connection.read_exact(&mut [0]).unwrap();
-            if signal.is_none() && mode != "backlog-results" {
+            if signal.is_none() && !matches!(mode, "backlog-results" | "retained-reader") {
                 drop(child.stdout.take());
             }
             connection.write_all(&[1]).unwrap();
@@ -546,14 +765,44 @@ mod tests {
                 thread::sleep(Duration::from_millis(10));
             }
             assert!(ready.exists(), "The termination fixture was not ready ({mode}).");
-            #[cfg(unix)]
+            if mode == "retained-reader" {
+                let output = child.stdout.take().unwrap();
+                let (printed, first) = mpsc::channel();
+                let reader = thread::spawn(move || {
+                    let mut output = BufReader::new(output);
+                    loop {
+                        let mut line = String::new();
+                        assert_ne!(output.read_line(&mut line).unwrap(), 0, "The CLI closed stdout before forwarding the first line.");
+                        if line.trim_end().ends_with("The runtime is still running.") {
+                            printed.send(output).unwrap();
+                            break;
+                        }
+                    }
+                });
+                let output = first.recv_timeout(Duration::from_secs(5)).expect("The CLI did not forward the first runtime line.");
+                reader.join().unwrap();
+                assert!(child.try_wait().unwrap().is_none(), "A successful write must not stop the CLI.");
+                connection.set_nonblocking(true).unwrap();
+                assert_eq!(connection.read(&mut [0]).unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+                connection.set_nonblocking(false).unwrap();
+                drop(output);
+                // A vanished reader is observable only on the next write, not retroactively.
+                connection.write_all(&[2]).unwrap();
+            }
             if mode == "blocked-output" {
+                #[cfg(unix)]
                 use std::os::fd::AsRawFd;
                 let output = child.stdout.as_ref().unwrap();
                 let mut previous = 0;
                 loop {
-                    let mut available = 0;
-                    assert_eq!(unsafe { libc::ioctl(output.as_raw_fd(), libc::FIONREAD, &mut available) }, 0);
+                    #[cfg(unix)]
+                    let available = {
+                        let mut available = 0;
+                        assert_eq!(unsafe { libc::ioctl(output.as_raw_fd(), libc::FIONREAD, &mut available) }, 0);
+                        available
+                    };
+                    #[cfg(windows)]
+                    let available = super::windows_tests::available(output) as i32;
                     if available >= 4096 && available == previous {
                         break;
                     }
@@ -565,6 +814,10 @@ mod tests {
             #[cfg(unix)]
             if let Some(signal) = signal {
                 assert_eq!(unsafe { libc::kill(-(child.id() as libc::pid_t), signal) }, 0);
+            }
+            #[cfg(windows)]
+            if signal.is_some() {
+                super::windows_tests::send_ctrl_c(child.id());
             }
             if mode == "interrupt-results" {
                 project.write("report", "");
@@ -629,6 +882,10 @@ mod tests {
             if let Some(signal) = signal {
                 assert_eq!(status.signal(), Some(signal), "{mode}, {status:?}");
             }
+            #[cfg(windows)]
+            if let Some(signal) = signal {
+                assert_eq!(status.code(), Some(signal), "{mode}, {status:?}");
+            }
             if let Some(output) = output {
                 let output = output.join().unwrap();
                 let tail = &output[output.len().saturating_sub(2048)..];
@@ -670,9 +927,46 @@ mod tests {
         termination_case(None, "backlog-results");
     }
 
+    fn isolated_broken_stdout(mode: &str) {
+        let project = TempProject::new(&format!("isolated-{mode}"));
+        project.write("isolated-mode", mode);
+        // Create the tested pipe inside a helper, beyond unrelated suite forks.
+        let mut child = fixture_command("standalone::process::tests::broken_stdout_fixture")
+            .current_dir(&project)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let status = wait_for_exit(|| child.try_wait(), Instant::now() + Duration::from_secs(20));
+        if status.is_err() {
+            let _ = child.kill();
+            let _ = wait_for_exit(|| child.try_wait(), Instant::now() + Duration::from_secs(5));
+        }
+        assert!(status.expect("The isolated stdout fixture did not finish.").success(), "The isolated stdout fixture failed ({mode}).");
+    }
+
+    #[test]
+    #[ignore = "invoked as an isolated subprocess by broken stdout tests"]
+    fn broken_stdout_fixture() {
+        let mode = fs::read_to_string("isolated-mode").unwrap();
+        assert!(matches!(mode.as_str(), "broken-pipe" | "moved-launcher-broken-pipe" | "retained-reader"));
+        termination_case(None, &mode);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn broken_stdout_stops_a_launcher_that_moved_to_another_group() {
+        isolated_broken_stdout("moved-launcher-broken-pipe");
+    }
+
     #[test]
     fn broken_stdout_unwinds_without_leaving_the_runtime_running() {
-        termination_case(None, "broken-pipe");
+        isolated_broken_stdout("broken-pipe");
+    }
+
+    #[test]
+    fn a_reader_that_disappears_requires_another_write_before_cleanup() {
+        isolated_broken_stdout("retained-reader");
     }
 
     fn exited() -> ExitStatus {
