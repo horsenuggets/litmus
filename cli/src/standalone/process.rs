@@ -119,19 +119,17 @@ fn run_with_budget(
     };
     if stopped.is_ok() {
         let drain_deadline = Instant::now() + Duration::from_secs(1);
-        let mut final_report = None;
-        while Instant::now() < drain_deadline && !interrupt.cancelled() {
-            match receiver.recv_timeout(TICK) {
-                Ok(Message::Printed(line)) => display.print(&line),
-                Ok(Message::Event(event)) => display.take(event),
-                Ok(Message::Results(results)) => {
-                    final_report = Some(results);
-                    break;
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
-            }
-        }
+        let final_report = collect_final_report(
+            &receiver,
+            drain_deadline,
+            Instant::now,
+            || interrupt.cancelled(),
+            |message| match message {
+                Message::Printed(line) => display.print(&line),
+                Message::Event(event) => display.take(event),
+                Message::Results(_) => unreachable!("The collector returns results without forwarding them."),
+            },
+        );
         display.finish();
         reported = reported.map(|report| report.or(final_report));
     }
@@ -144,6 +142,24 @@ fn run_with_budget(
     }
 
     outcome
+}
+
+fn collect_final_report(
+    receiver: &mpsc::Receiver<Message>,
+    deadline: Instant,
+    mut now: impl FnMut() -> Instant,
+    mut cancelled: impl FnMut() -> bool,
+    mut forward: impl FnMut(Message),
+) -> Option<String> {
+    while now() < deadline && !cancelled() {
+        match receiver.recv_timeout(TICK) {
+            Ok(Message::Results(results)) => return Some(results),
+            Ok(message) => forward(message),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    None
 }
 
 fn stop_owned(mut child: Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Result<ExitStatus, String> {
@@ -239,6 +255,7 @@ fn read(text: &str) -> Option<Message> {
 mod tests {
     use super::*;
     use crate::testing::TempProject;
+    use std::cell::Cell;
     use std::fs;
     use std::io::{Cursor, Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -294,6 +311,176 @@ mod tests {
         });
 
         assert_eq!(passed, 1);
+    }
+
+    #[test]
+    fn retains_results_received_during_final_collection() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Message::Results("{\"specs\":[]}".to_owned())).unwrap();
+        drop(sender);
+        let now = Instant::now();
+
+        let report = collect_final_report(
+            &receiver,
+            now + Duration::from_secs(1),
+            || now,
+            || false,
+            |_| panic!("Results must be returned, not forwarded."),
+        );
+
+        assert_eq!(report.as_deref(), Some("{\"specs\":[]}"));
+    }
+
+    #[test]
+    fn forwards_final_prints_and_events_in_order_without_forwarding_results() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(printed("first")).unwrap();
+        sender.send(Message::Event(Event::Loading { spec: 1 })).unwrap();
+        sender.send(printed("second")).unwrap();
+        sender.send(Message::Event(Event::Settled)).unwrap();
+        let now = Instant::now();
+        let guard = now + Duration::from_secs(5);
+        let mut forwarded = Vec::new();
+
+        let report = collect_final_report(
+            &receiver,
+            now + Duration::from_secs(1),
+            || now,
+            || Instant::now() >= guard,
+            |message| {
+                // The report is only queued when output is forwarded during collection.
+                if message == Message::Event(Event::Settled) {
+                    sender.send(Message::Results("report".to_owned())).unwrap();
+                }
+                forwarded.push(message);
+            },
+        );
+
+        assert_eq!(report.as_deref(), Some("report"));
+        assert_eq!(
+            forwarded,
+            [printed("first"), Message::Event(Event::Loading { spec: 1 }), printed("second"), Message::Event(Event::Settled)]
+        );
+    }
+
+    #[test]
+    fn final_collection_leaves_every_message_after_the_first_result_queued() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Message::Results("first report".to_owned())).unwrap();
+        sender.send(printed("later print")).unwrap();
+        sender.send(Message::Event(Event::Settled)).unwrap();
+        sender.send(Message::Results("later report".to_owned())).unwrap();
+        drop(sender);
+        let now = Instant::now();
+
+        let report = collect_final_report(
+            &receiver,
+            now + Duration::from_secs(1),
+            || now,
+            || false,
+            |_| panic!("Nothing after the first result may be forwarded."),
+        );
+
+        assert_eq!(report.as_deref(), Some("first report"));
+        assert_eq!(receiver.try_recv().unwrap(), printed("later print"));
+        assert_eq!(receiver.try_recv().unwrap(), Message::Event(Event::Settled));
+        assert_eq!(receiver.try_recv().unwrap(), Message::Results("later report".to_owned()));
+        assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+    }
+
+    #[test]
+    fn elapsed_deadline_stops_final_collection_with_messages_always_queued() {
+        for initially_elapsed in [false, true] {
+            let (sender, receiver) = mpsc::channel();
+            sender.send(printed("first")).unwrap();
+            sender.send(printed("second")).unwrap();
+            sender.send(Message::Results("too late".to_owned())).unwrap();
+            drop(sender);
+            let start = Instant::now();
+            let deadline = start + Duration::from_secs(1);
+            let clock = Cell::new(if initially_elapsed { deadline } else { start });
+            let mut forwarded = Vec::new();
+
+            let report = collect_final_report(
+                &receiver,
+                deadline,
+                || clock.get(),
+                || false,
+                |message| {
+                    forwarded.push(message);
+                    clock.set(deadline);
+                },
+            );
+
+            assert_eq!(report, None);
+            if initially_elapsed {
+                assert!(forwarded.is_empty());
+                assert_eq!(receiver.try_recv().unwrap(), printed("first"));
+            } else {
+                assert_eq!(forwarded, [printed("first")]);
+            }
+            assert_eq!(receiver.try_recv().unwrap(), printed("second"));
+            assert_eq!(receiver.try_recv().unwrap(), Message::Results("too late".to_owned()));
+        }
+    }
+
+    #[test]
+    fn cancellation_stops_final_collection_with_messages_always_queued() {
+        for initially_cancelled in [false, true] {
+            let (sender, receiver) = mpsc::channel();
+            sender.send(printed("first")).unwrap();
+            sender.send(printed("second")).unwrap();
+            sender.send(Message::Results("too late".to_owned())).unwrap();
+            drop(sender);
+            let now = Instant::now();
+            let cancelled = Cell::new(initially_cancelled);
+            let mut forwarded = Vec::new();
+
+            let report = collect_final_report(
+                &receiver,
+                now + Duration::from_secs(1),
+                || now,
+                || cancelled.get(),
+                |message| {
+                    forwarded.push(message);
+                    cancelled.set(true);
+                },
+            );
+
+            assert_eq!(report, None);
+            if initially_cancelled {
+                assert!(forwarded.is_empty());
+                assert_eq!(receiver.try_recv().unwrap(), printed("first"));
+            } else {
+                assert_eq!(forwarded, [printed("first")]);
+            }
+            assert_eq!(receiver.try_recv().unwrap(), printed("second"));
+            assert_eq!(receiver.try_recv().unwrap(), Message::Results("too late".to_owned()));
+        }
+    }
+
+    #[test]
+    fn final_collection_with_an_open_idle_sender_finishes_at_its_deadline() {
+        let (sender, receiver) = mpsc::channel();
+        let (finished, completion) = mpsc::channel();
+        let collector = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_millis(20);
+            let report = collect_final_report(
+                &receiver,
+                deadline,
+                Instant::now,
+                || false,
+                |_| panic!("The open sender has no data."),
+            );
+            finished.send((report, Instant::now() >= deadline)).unwrap();
+        });
+
+        let (report, elapsed) = completion.recv_timeout(Duration::from_secs(5)).expect("The idle collector did not finish.");
+        // Keep the sender open until collection completes, rather than testing disconnection.
+        drop(sender);
+        collector.join().unwrap();
+        assert_eq!(report, None);
+        assert!(elapsed, "Collection must wait for the future deadline.");
     }
 
     fn fixture_command(name: &str) -> Command {
