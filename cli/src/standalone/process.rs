@@ -23,7 +23,6 @@ unsafe extern "C" {
     fn proc_listpgrppids(group: libc::pid_t, buffer: *mut std::ffi::c_void, size: libc::c_int) -> libc::c_int;
 }
 
-const BUDGET: Duration = Duration::from_secs(300);
 const CLEANUP_BUDGET: Duration = Duration::from_secs(1);
 const TICK: Duration = Duration::from_millis(100);
 
@@ -32,6 +31,39 @@ enum Message {
     Printed(String),
     Event(Event),
     Results(String),
+}
+
+pub(super) fn deadline(started: Instant, timeout: u64) -> Result<Option<Instant>, String> {
+    if timeout == 0 {
+        return Ok(None);
+    }
+
+    started
+        .checked_add(Duration::from_secs(timeout))
+        .map(Some)
+        .ok_or_else(|| format!("The standalone timeout of {timeout} seconds is too large for this platform."))
+}
+
+fn poll_interval(deadline: Option<Instant>, now: Instant) -> Duration {
+    match deadline {
+        Some(deadline) => deadline.saturating_duration_since(now).min(TICK),
+        None => TICK,
+    }
+}
+
+fn collection_deadline(execution: Option<Instant>, now: Instant) -> Instant {
+    let limit = now + Duration::from_secs(1);
+    execution.map_or(limit, |execution| execution.min(limit))
+}
+
+fn record_report(accepted: &mut Option<String>, report: &str, deadline: Option<Instant>, now: Instant) {
+    if accepted.is_none() && deadline.is_none_or(|deadline| now < deadline) {
+        *accepted = Some(report.to_owned());
+    }
+}
+
+fn report_deadline(execution: Option<Instant>, accepted: &Option<String>) -> Option<Instant> {
+    execution.filter(|_| accepted.is_none())
 }
 
 struct OwnedChild {
@@ -58,19 +90,25 @@ impl Drop for OwnedChild {
     }
 }
 
-pub fn run(project_dir: &Path, run: &[String], specs: &[String], interrupt: &Interrupt) -> Result<String, String> {
-    run_with_budget(project_dir, run, specs, BUDGET, interrupt)
+struct Watchdog {
+    finished: mpsc::Sender<()>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 
-fn run_with_budget(
-    project_dir: &Path,
-    run: &[String],
-    specs: &[String],
-    budget: Duration,
-    interrupt: &Interrupt,
-) -> Result<String, String> {
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        let _ = self.finished.send(());
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+pub fn run(project_dir: &Path, run: &[String], specs: &[String], timeout: u64, interrupt: &Interrupt) -> Result<String, String> {
     let script = format!("{FOLDER}/{SCRIPT}");
     let shown = format!("{} {script}", run.join(" "));
+    let deadline = deadline(Instant::now(), timeout)?;
+    let budget = Duration::from_secs(timeout);
 
     let mut command = CommandWrap::with_new(&run[0], |command| {
         command.args(&run[1..]).arg(&script).current_dir(project_dir).stdin(Stdio::null()).stdout(Stdio::piped());
@@ -99,44 +137,92 @@ fn run_with_budget(
         crate::interrupt::terminate(signal);
     });
 
+    let accepted = Arc::new(Mutex::new(None));
+    let relayed_report = Arc::clone(&accepted);
     let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || relay(BufReader::new(output), |message| sender.send(message).is_ok()));
+    thread::spawn(move || {
+        relay(BufReader::new(output), |message| {
+            if let Message::Results(report) = &message {
+                // Sample under the same lock as expiry decisions, independently of display I/O.
+                let mut accepted = relayed_report.lock().unwrap();
+                record_report(&mut accepted, report, deadline, Instant::now());
+            }
+            sender.send(message).is_ok()
+        });
+    });
+    let execution_wait = || {
+        let accepted = accepted.lock().unwrap();
+        poll_interval(report_deadline(deadline, &accepted), Instant::now())
+    };
 
-    let deadline = Instant::now() + budget;
+    let _watchdog = deadline.map(|deadline| {
+        let (finished, completion) = mpsc::channel();
+        let timed_child = Arc::downgrade(&child);
+        let timed_command = shown.clone();
+        let worker = thread::spawn(move || {
+            if matches!(completion.recv_timeout(deadline.saturating_duration_since(Instant::now())), Err(RecvTimeoutError::Timeout))
+                && let Some(child) = timed_child.upgrade()
+            {
+                // Cleanup cannot depend on the output consumer continuing to read stdout.
+                let _ = child.lock().unwrap().stop(&timed_command);
+            }
+        });
+        Watchdog { finished, worker: Some(worker) }
+    });
     let mut display = Display::new(specs.to_vec());
+    let mut output_closed = false;
 
     let mut reported = loop {
         if interrupt.cancelled() {
             break Ok(None);
         }
-        let message = receiver.recv_timeout(TICK);
+        let wait = execution_wait();
+        if wait.is_zero() {
+            break Err(format!("`{shown}` was stopped, still running after {}", in_words(budget)));
+        }
+        let message = if output_closed {
+            thread::sleep(wait);
+            None
+        } else {
+            Some(receiver.recv_timeout(wait))
+        };
         if interrupt.cancelled() {
             break Ok(None);
         }
+        if execution_wait().is_zero() {
+            break Err(format!("`{shown}` was stopped, still running after {}", in_words(budget)));
+        }
         match message {
-            Ok(Message::Printed(line)) => display.print(&line),
-            Ok(Message::Event(event)) => display.take(event),
-            Ok(Message::Results(results)) => break Ok(Some(results)),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break Ok(None),
+            Some(Ok(Message::Printed(line))) => display.print(&line),
+            Some(Ok(Message::Event(event))) => display.take(event),
+            Some(Ok(Message::Results(_))) => break Ok(accepted.lock().unwrap().clone()),
+            Some(Err(RecvTimeoutError::Disconnected)) => output_closed = true,
+            Some(Err(RecvTimeoutError::Timeout)) | None => {}
+        }
+
+        if execution_wait().is_zero() {
+            break Err(format!("`{shown}` was stopped, still running after {}", in_words(budget)));
         }
 
         // Poll the launcher, not the group or job. Descendants can keep stdout open.
         let launcher_status = {
             let mut owned = child.lock().unwrap();
-            let child = owned.child.as_mut().expect("The run still owns its child.");
-            // SAFETY: Polling preserves the native child and ownership handles.
-            let launcher = unsafe { child.try_inner_child_mut() }.expect("The command has a native child.");
-            launcher_exited(launcher)
+            match owned.child.as_mut() {
+                Some(child) => {
+                    // SAFETY: Polling preserves the native child and ownership handles.
+                    let launcher = unsafe { child.try_inner_child_mut() }.expect("The command has a native child.");
+                    launcher_exited(launcher)
+                }
+                None => Ok(true),
+            }
         };
+        if execution_wait().is_zero() {
+            break Err(format!("`{shown}` was stopped, still running after {}", in_words(budget)));
+        }
         match launcher_status {
             Ok(true) => break Ok(None),
             Ok(false) => {}
             Err(error) => break Err(format!("couldn't tell how `{shown}` ended: {error}")),
-        }
-
-        if Instant::now() >= deadline {
-            break Err(format!("`{shown}` was stopped, still running after {}", in_words(budget)));
         }
 
         display.refresh();
@@ -149,11 +235,25 @@ fn run_with_budget(
         owned.stop(&shown)
     };
     reported = collect_report(reported, || {
-        let drain_deadline = Instant::now() + Duration::from_secs(1);
+        let collecting = Instant::now();
+        let collection_wait = || {
+            let accepted = accepted.lock().unwrap();
+            let drain_deadline = collection_deadline(report_deadline(deadline, &accepted), collecting);
+            poll_interval(Some(drain_deadline), Instant::now())
+        };
         // Collect before replaying logs so output backpressure cannot hide queued results.
+        // Timely completion lifts execution expiry, not the one-second collection bound.
         let mut pending = Vec::new();
-        while Instant::now() < drain_deadline && !interrupt.cancelled() {
-            match receiver.recv_timeout(TICK) {
+        while !interrupt.cancelled() {
+            let wait = collection_wait();
+            if wait.is_zero() {
+                break;
+            }
+            let message = receiver.recv_timeout(wait);
+            if collection_wait().is_zero() {
+                break;
+            }
+            match message {
                 Ok(message) => {
                     let last = matches!(message, Message::Results(_));
                     pending.push(message);
@@ -165,12 +265,12 @@ fn run_with_budget(
                 Err(RecvTimeoutError::Disconnected) => break,
             }
         }
-        let mut final_report = None;
+        let final_report = accepted.lock().unwrap().clone();
         for message in pending {
             match message {
                 Message::Printed(line) => display.print(&line),
                 Message::Event(event) => display.take(event),
-                Message::Results(results) => final_report = Some(results),
+                Message::Results(_) => {}
             }
         }
         display.finish();
@@ -443,7 +543,7 @@ mod tests {
         #[cfg(windows)]
         super::windows_tests::ignore_ctrl_c(true);
         let mode = fs::read_to_string("mode").unwrap();
-        if mode == "natural-backlog-results" {
+        if matches!(mode.as_str(), "natural-backlog-results" | "timely-backlog-results") {
             descendant_fixture();
             return;
         }
@@ -492,23 +592,36 @@ mod tests {
                 thread::sleep(Duration::from_millis(10));
             }
         }
-        if matches!(mode.as_str(), "results" | "inactive" | "interrupt-results") {
+        if mode == "delayed-results" {
+            thread::sleep(Duration::from_millis(1200));
+        }
+        if matches!(mode.as_str(), "results" | "inactive" | "interrupt-results" | "delayed-results") {
             println!("\n{MARKER}{{\"specs\":[]}}");
             std::io::stdout().flush().unwrap();
         }
         let prints = match mode.as_str() {
-            "backlog-results" | "interrupt-output" | "natural-backlog-results" => 10_000,
-            "blocked-output" => 1_000_000,
+            "backlog-results" | "interrupt-output" | "natural-backlog-results" | "timely-backlog-results" => 10_000,
+            "blocked-output" | "timeout-output" => 1_000_000,
             "broken-pipe" | "moved-launcher-broken-pipe" | "retained-reader" => 1,
             _ => 0,
         };
         for _ in 0..prints {
             println!("The runtime is still running.");
         }
-        if matches!(mode.as_str(), "backlog-results" | "natural-backlog-results") {
+        if mode == "timely-backlog-results" {
+            // The controller releases the report only after downstream stdout stalls.
+            connection.read_exact(&mut acknowledged).unwrap();
+            assert_eq!(acknowledged, [2]);
+        }
+        if matches!(mode.as_str(), "backlog-results" | "natural-backlog-results" | "timely-backlog-results") {
             println!("\n{MARKER}{{\"specs\":[]}}");
             std::io::stdout().flush().unwrap();
             fs::write("reported", "").unwrap();
+        }
+        if mode == "timely-backlog-results" {
+            connection.write_all(&[3]).unwrap();
+            // Socket EOF now witnesses native exit, not merely a dropped local stream.
+            std::process::exit(0);
         }
         if mode == "retained-reader" {
             let mut repeat = [0];
@@ -534,6 +647,10 @@ mod tests {
     }
 
     fn cleaned_up(mode: &str) -> Result<String, String> {
+        cleaned_up_with_timeout(mode, 5)
+    }
+
+    fn cleaned_up_with_timeout(mode: &str, timeout: u64) -> Result<String, String> {
         let project = TempProject::new(&format!("process-cleanup-{mode}"));
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -549,7 +666,7 @@ mod tests {
             let project = &project;
             let command = &command;
             let runner = scope.spawn(move || {
-                let result = run_with_budget(project, command, &[], Duration::from_secs(5), &Interrupt::default());
+                let result = run(project, command, &[], timeout, &Interrupt::default());
                 let _ = finished.send(result);
             });
             let deadline = Instant::now() + Duration::from_secs(3);
@@ -670,6 +787,13 @@ mod tests {
     }
 
     #[test]
+    fn disabled_deadlines_allow_delayed_results_and_still_clean_up_the_runtime() {
+        let started = Instant::now();
+        assert_eq!(cleaned_up_with_timeout("delayed-results", 0).unwrap(), "{\"specs\":[]}");
+        assert!(started.elapsed() >= Duration::from_millis(1200));
+    }
+
+    #[test]
     fn keeps_results_printed_just_before_the_wrapper_exits() {
         assert_eq!(cleaned_up("exited-results").unwrap(), "{\"specs\":[]}");
     }
@@ -707,6 +831,10 @@ mod tests {
         if matches!(mode.as_str(), "interrupt" | "interrupt-output" | "interrupt-results" | "inactive" | "blocked-output") {
             super::windows_tests::ignore_ctrl_c(false);
         }
+        if mode == "timeout-output" {
+            let outcome = run(Path::new("."), &wrapper_run(), &[], 1, &Interrupt::default());
+            std::process::exit(if outcome.is_err() { 2 } else { 0 });
+        }
         let command = crate::Command::parse(&["test", "--standalone"]).unwrap();
         let outcome = crate::dispatch(command);
         if mode == "inactive" {
@@ -717,11 +845,15 @@ mod tests {
     }
 
     pub(super) fn termination_case(signal: Option<i32>, mode: &str) {
+        termination_case_with_timeout(signal, mode, 300);
+    }
+
+    fn termination_case_with_timeout(signal: Option<i32>, mode: &str, timeout: u64) {
         #[cfg(unix)]
         use std::os::unix::process::{CommandExt, ExitStatusExt};
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
-        let project = TempProject::new(&format!("process-{signal:?}-{mode}"));
+        let project = TempProject::new(&format!("process-{signal:?}-{mode}-{timeout}"));
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
         project.write("address", &listener.local_addr().unwrap().to_string());
@@ -733,7 +865,7 @@ mod tests {
         project.write("tests/a.spec.luau", "");
         project.write(
             "litmus.toml",
-            &format!("[standalone]\nrun = {}\nlib = \"lib\"\nspecs = [\"tests\"]\n", serde_json::to_string(&wrapper_run()).unwrap()),
+            &format!("[standalone]\nrun = {}\ntimeout = {timeout}\nlib = \"lib\"\nspecs = [\"tests\"]\n", serde_json::to_string(&wrapper_run()).unwrap()),
         );
         let mut command = fixture_command("standalone::process::tests::interrupt_fixture");
         #[cfg(unix)]
@@ -742,6 +874,7 @@ mod tests {
         if signal.is_some() {
             super::windows_tests::new_console(&mut command);
         }
+        let started = Instant::now();
         let mut child = command
             .current_dir(&project)
             .stdin(Stdio::null())
@@ -766,7 +899,9 @@ mod tests {
             connection.set_nonblocking(false).unwrap();
             connection.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
             connection.read_exact(&mut [0]).unwrap();
-            if signal.is_none() && !matches!(mode, "backlog-results" | "natural-backlog-results" | "retained-reader") {
+            if signal.is_none()
+                && !matches!(mode, "backlog-results" | "natural-backlog-results" | "retained-reader" | "timeout-output" | "timely-backlog-results")
+            {
                 drop(child.stdout.take());
             }
             connection.write_all(&[1]).unwrap();
@@ -775,6 +910,7 @@ mod tests {
                 thread::sleep(Duration::from_millis(10));
             }
             assert!(ready.exists(), "The termination fixture was not ready ({mode}).");
+            let runtime_ready = Instant::now();
             if mode == "retained-reader" {
                 let output = child.stdout.take().unwrap();
                 let (printed, first) = mpsc::channel();
@@ -799,7 +935,7 @@ mod tests {
                 // A vanished reader is observable only on the next write, not retroactively.
                 connection.write_all(&[2]).unwrap();
             }
-            if mode == "blocked-output" {
+            if matches!(mode, "blocked-output" | "timeout-output" | "timely-backlog-results") {
                 #[cfg(unix)]
                 use std::os::fd::AsRawFd;
                 let output = child.stdout.as_ref().unwrap();
@@ -832,7 +968,45 @@ mod tests {
             if mode == "interrupt-results" {
                 project.write("report", "");
             }
-            let output = if matches!(mode, "backlog-results" | "natural-backlog-results") {
+            let output = if mode == "timely-backlog-results" {
+                // Neither the report nor exit is inferred from a sleep. Require a flushed
+                // report acknowledgement and native socket closure before the earliest
+                // possible execution deadline (which starts after this CLI was spawned).
+                connection.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                connection.write_all(&[2]).unwrap();
+                let mut reported = [0];
+                connection.read_exact(&mut reported).unwrap();
+                assert_eq!(reported, [3]);
+                assert!(project.join("reported").exists(), "The runtime did not flush its report.");
+                assert_eq!(connection.read(&mut [0]).unwrap(), 0, "The completed runtime did not exit.");
+                assert!(Instant::now() + TICK < started + Duration::from_secs(timeout), "The report and exit were not timely.");
+                assert!(child.try_wait().unwrap().is_none(), "The CLI must still be blocked on downstream stdout.");
+                // Readiness is observed after run starts, so this target is later than
+                // its fixed execution deadline, even when CLI startup was slow.
+                thread::sleep((runtime_ready + Duration::from_secs(timeout) + TICK).saturating_duration_since(Instant::now()));
+                assert!(child.try_wait().unwrap().is_none(), "The downstream pipe must remain stalled past expiry.");
+                let mut output = child.stdout.take().unwrap();
+                Some(thread::spawn(move || {
+                    let mut printed = Vec::new();
+                    output.read_to_end(&mut printed).unwrap();
+                    printed
+                }))
+            } else if mode == "timeout-output" {
+                connection.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                let read = connection.read(&mut [0]);
+                assert!(
+                    matches!(read, Ok(0)) || read.as_ref().is_err_and(|error| matches!(
+                        error.kind(), std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::ConnectionReset
+                    )),
+                    "The runtime survived its deadline while stdout was blocked ({read:?})."
+                );
+                let mut output = child.stdout.take().unwrap();
+                Some(thread::spawn(move || {
+                    let mut printed = Vec::new();
+                    output.read_to_end(&mut printed).unwrap();
+                    printed
+                }))
+            } else if matches!(mode, "backlog-results" | "natural-backlog-results") {
                 let reported = project.join("reported");
                 while !reported.exists() && Instant::now() < deadline {
                     thread::sleep(Duration::from_millis(10));
@@ -899,7 +1073,18 @@ mod tests {
             if let Some(output) = output {
                 let output = output.join().unwrap();
                 let tail = &output[output.len().saturating_sub(2048)..];
-                assert!(status.success(), "Queued results were lost ({status:?}). Output tail follows. {}", String::from_utf8_lossy(tail));
+                if mode == "timeout-output" {
+                    assert_eq!(status.code(), Some(2), "The blocked-output timeout did not fail the run.");
+                } else {
+                    assert!(status.success(), "Queued results were lost ({status:?}). Output tail follows. {}", String::from_utf8_lossy(tail));
+                    if mode == "timely-backlog-results" {
+                        assert_eq!(
+                            String::from_utf8_lossy(&output).matches("The runtime is still running.").count(),
+                            10_000,
+                            "Final collection must preserve the logs preceding the accepted report."
+                        );
+                    }
+                }
             } else if signal.is_none() {
                 assert!(!status.success(), "The broken stdout did not interrupt the fixture.");
             }
@@ -911,6 +1096,17 @@ mod tests {
         let _ = child.wait();
         if let Err(problem) = outcome {
             resume_unwind(problem);
+        }
+    }
+
+    #[test]
+    fn disabled_deadlines_preserve_native_interruption_and_process_cleanup() {
+        #[cfg(unix)]
+        let signal = libc::SIGINT;
+        #[cfg(windows)]
+        let signal = 0xC000013A_u32 as i32;
+        for mode in ["interrupt", "interrupt-results", "blocked-output"] {
+            termination_case_with_timeout(Some(signal), mode, 0);
         }
     }
 
@@ -930,6 +1126,16 @@ mod tests {
         for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
             termination_case(Some(signal), "blocked-output");
         }
+    }
+
+    #[test]
+    fn timeout_stops_the_runtime_even_when_the_output_consumer_stops_reading() {
+        termination_case(None, "timeout-output");
+    }
+
+    #[test]
+    fn timely_results_survive_output_blocked_beyond_the_execution_deadline() {
+        termination_case_with_timeout(None, "timely-backlog-results", 8);
     }
 
     #[test]
@@ -1086,9 +1292,222 @@ mod tests {
     }
 
     #[test]
+    fn a_disabled_deadline_has_no_expiry() {
+        let started = Instant::now();
+
+        assert_eq!(deadline(started, 0), Ok(None));
+    }
+
+    #[test]
+    fn a_configured_deadline_uses_exact_seconds() {
+        let started = Instant::now();
+
+        for timeout in [1, 300, 900] {
+            let expires = deadline(started, timeout).unwrap().unwrap();
+
+            assert_eq!(expires.duration_since(started), Duration::from_secs(timeout));
+            assert!(started < expires);
+            assert!(started + Duration::from_secs(timeout) >= expires);
+        }
+    }
+
+    #[test]
+    fn polling_never_waits_past_expiry_or_accepts_the_exact_boundary() {
+        let now = Instant::now();
+
+        assert_eq!(poll_interval(None, now), TICK);
+        assert_eq!(poll_interval(Some(now + Duration::from_secs(1)), now), TICK);
+        assert_eq!(poll_interval(Some(now + Duration::from_millis(25)), now), Duration::from_millis(25));
+        assert_eq!(poll_interval(Some(now), now), Duration::ZERO);
+        assert_eq!(poll_interval(Some(now), now + Duration::from_millis(1)), Duration::ZERO);
+    }
+
+    #[test]
+    fn relay_acceptance_is_strictly_before_the_fixed_deadline() {
+        let expires = Instant::now() + Duration::from_secs(1);
+        for (arrival, timely) in [
+            (expires - Duration::from_nanos(1), true),
+            (expires, false),
+            (expires + Duration::from_nanos(1), false),
+        ] {
+            let mut accepted = None;
+            record_report(&mut accepted, "reported results", Some(expires), arrival);
+
+            assert_eq!(accepted.as_deref(), timely.then_some("reported results"), "{arrival:?}");
+        }
+    }
+
+    #[test]
+    fn relay_acceptance_without_an_execution_deadline_remains_unlimited() {
+        let now = Instant::now();
+        let mut accepted = None;
+        record_report(&mut accepted, "first results", None, now + Duration::from_secs(3600));
+        record_report(&mut accepted, "replacement results", None, now + Duration::from_secs(7200));
+
+        assert_eq!(accepted.as_deref(), Some("first results"));
+        assert_eq!(poll_interval(report_deadline(None, &accepted), now), TICK);
+    }
+
+    #[test]
+    fn timely_relay_acceptance_survives_later_display_expiry_and_collects_queued_messages() {
+        let expires = Instant::now() + Duration::from_secs(1);
+        let execution = Some(expires);
+        let mut accepted = None;
+        record_report(&mut accepted, "timely results", execution, expires - Duration::from_nanos(1));
+        // The display resumes long after expiry, but receipt happened on the relay thread.
+        let resumed = expires + Duration::from_secs(5);
+        record_report(&mut accepted, "late replacement", execution, resumed);
+        assert_eq!(poll_interval(execution, resumed), Duration::ZERO);
+        assert_eq!(poll_interval(report_deadline(execution, &accepted), resumed), TICK);
+        let drain = collection_deadline(report_deadline(execution, &accepted), resumed);
+        assert_eq!(drain, resumed + CLEANUP_BUDGET);
+        assert_eq!(poll_interval(Some(drain), resumed), TICK);
+        assert_eq!(poll_interval(Some(drain), drain), Duration::ZERO);
+        let mut replayed = Vec::new();
+        let reported = collect_report(Ok(accepted.clone()), || {
+            replayed = relayed("preceding log\n@@litmus-progress@@{\"kind\":\"settled\"}\n@@litmus-run@@timely results\n");
+            accepted.clone()
+        });
+
+        assert_eq!(replayed, [printed("preceding log"), Message::Event(Event::Settled), Message::Results("timely results".to_owned())]);
+        assert_eq!(outcome("runtime", reported, Ok(exited())), (Ok("timely results".to_owned()), None));
+    }
+
+    #[test]
+    fn timely_acceptance_during_collection_lifts_only_execution_expiry() {
+        let collecting = Instant::now();
+        let expires = collecting + Duration::from_millis(25);
+        let mut accepted = None;
+        assert_eq!(collection_deadline(report_deadline(Some(expires), &accepted), collecting), expires);
+        record_report(&mut accepted, "timely results", Some(expires), expires - Duration::from_nanos(1));
+
+        let drain = collection_deadline(report_deadline(Some(expires), &accepted), collecting);
+        assert_eq!(drain, collecting + CLEANUP_BUDGET);
+        assert_eq!(poll_interval(Some(drain), expires), TICK);
+        assert_eq!(poll_interval(Some(drain), drain), Duration::ZERO);
+    }
+
+    #[test]
+    fn genuinely_late_relay_reports_cannot_rescue_expiry_or_extend_collection() {
+        let expires = Instant::now();
+        for arrival in [expires, expires + Duration::from_nanos(1)] {
+            let mut accepted = None;
+            record_report(&mut accepted, "late results", Some(expires), arrival);
+            let execution = report_deadline(Some(expires), &accepted);
+            assert_eq!(accepted, None);
+            assert_eq!(poll_interval(execution, arrival), Duration::ZERO);
+            assert_eq!(collection_deadline(execution, arrival), expires);
+            let reported = collect_report(Err("it timed out".to_owned()), || panic!("Late receipt must not enable collection."));
+
+            assert_eq!(outcome("runtime", reported, Ok(exited())), (Err("it timed out".to_owned()), None));
+        }
+    }
+
+    #[test]
+    fn final_collection_cannot_extend_the_execution_deadline() {
+        let now = Instant::now();
+        assert_eq!(collection_deadline(None, now), now + Duration::from_secs(1));
+        assert_eq!(collection_deadline(Some(now + Duration::from_secs(5)), now), now + Duration::from_secs(1));
+        assert_eq!(collection_deadline(Some(now + Duration::from_millis(25)), now), now + Duration::from_millis(25));
+        assert_eq!(collection_deadline(Some(now), now), now);
+        assert_eq!(collection_deadline(Some(now - Duration::from_millis(1)), now), now - Duration::from_millis(1));
+    }
+
+    #[test]
+    fn accepted_results_survive_cleanup_that_passes_the_execution_deadline() {
+        let now = Instant::now();
+        let execution = Some(now - Duration::from_secs(1));
+        let reported = collect_report(Ok(Some("accepted results".to_owned())), || {
+            assert!(poll_interval(Some(collection_deadline(execution, now)), now).is_zero());
+            None
+        });
+
+        assert_eq!(outcome("lune run", reported, Ok(exited())), (Ok("accepted results".to_owned()), None));
+    }
+
+    #[test]
+    fn an_unrepresentable_deadline_is_rejected_before_spawning_the_command() {
+        let command = ["litmus-no-such-command".to_owned()];
+        let problem = run(Path::new("."), &command, &[], u64::MAX, &Interrupt::default()).unwrap_err();
+
+        assert!(problem.contains("timeout"), "{problem}");
+        assert!(!problem.contains("couldn't start"), "{problem}");
+    }
+
+    #[test]
+    fn a_deadline_that_does_not_fit_is_an_error_instead_of_a_panic() {
+        let started = Instant::now();
+        let timeout = u64::MAX;
+
+        assert!(started.checked_add(Duration::from_secs(timeout)).is_none());
+        let problem = deadline(started, timeout).unwrap_err();
+        assert!(problem.contains("timeout") && problem.contains(&timeout.to_string()), "{problem}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_silent_command_stops_at_the_configured_deadline() {
+        let dir = crate::testing::TempProject::new("silent-deadline");
+        let command = ["sh".to_owned(), "-c".to_owned(), "exec sleep 60".to_owned()];
+        let problem = run(&dir, &command, &[], 1, &Interrupt::default()).unwrap_err();
+
+        assert!(problem.contains("after 1 second"), "{problem}");
+        assert!(!problem.contains("after 1 seconds"), "{problem}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn progress_does_not_replace_the_configured_deadline() {
+        let dir = crate::testing::TempProject::new("progress-deadline");
+        let command = [
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "for tick in 1 2 3 4 5 6 7 8; do printf '%s\\n' '@@litmus-progress@@{\"kind\":\"settled\"}'; sleep 0.25; done; printf '%s\\n' '@@litmus-run@@{\"specs\":[]}'".to_owned(),
+        ];
+        let started = Instant::now();
+        let problem = run(&dir, &command, &[], 1, &Interrupt::default()).unwrap_err();
+
+        assert!(problem.contains("after 1 second"), "{problem}");
+        assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_result_after_expiry_is_not_accepted_during_a_receive_tick() {
+        let dir = crate::testing::TempProject::new("late-result-deadline");
+        let command = [
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "sleep 0.95; printf '%s\\n' '@@litmus-progress@@{\"kind\":\"settled\"}'; sleep 0.1; printf '%s\\n' '@@litmus-run@@{\"specs\":[]}'".to_owned(),
+        ];
+        let problem = run(&dir, &command, &[], 1, &Interrupt::default()).unwrap_err();
+
+        assert!(problem.contains("after 1 second"), "{problem}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn closing_stdout_does_not_escape_the_deadline() {
+        let dir = crate::testing::TempProject::new("closed-output-deadline");
+        let command = ["sh".to_owned(), "-c".to_owned(), "exec 1>&-; exec sleep 60".to_owned()];
+        let problem = run(&dir, &command, &[], 1, &Interrupt::default()).unwrap_err();
+
+        assert!(problem.contains("after 1 second"), "{problem}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_disabled_timeout_accepts_a_result_after_a_short_deadline_would_expire() {
+        let dir = crate::testing::TempProject::new("disabled-deadline");
+        let command = ["sh".to_owned(), "-c".to_owned(), "sleep 2; printf '%s\\n' '@@litmus-run@@{\"specs\":[]}'".to_owned()];
+
+        assert_eq!(run(&dir, &command, &[], 0, &Interrupt::default()), Ok("{\"specs\":[]}".to_owned()));
+    }
+
+    #[test]
     fn a_command_that_cannot_start_is_named() {
         let command = ["litmus-no-such-command".to_owned(), "run".to_owned()];
-        let problem = run(Path::new("."), &command, &[], &Interrupt::default()).unwrap_err();
+        let problem = run(Path::new("."), &command, &[], 300, &Interrupt::default()).unwrap_err();
 
         assert!(problem.contains("`litmus-no-such-command run .litmus/run.luau`"), "{problem}");
     }

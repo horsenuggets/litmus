@@ -23,6 +23,7 @@ pub struct Standalone {
     pub lib: String,
     pub specs: Vec<String>,
     pub adapter: Option<String>,
+    pub timeout: u64,
     #[serde(default)]
     pub flags: Vec<String>,
     pub specs_at_once: Option<u32>,
@@ -30,6 +31,7 @@ pub struct Standalone {
 
 impl Standalone {
     pub fn check(&self) -> Result<(), String> {
+        process::deadline(std::time::Instant::now(), self.timeout)?;
         if self.run.first().is_none_or(String::is_empty) {
             return Err("`run` has to start with the command that runs a Luau file, as in [\"lune\", \"run\"]".to_owned());
         }
@@ -83,7 +85,7 @@ pub fn run(
         .and_then(|()| fs::write(folder.join(SCRIPT), script))
         .map_err(|error| format!("couldn't write {FOLDER}/{SCRIPT}: {error}"))?;
 
-    let reported = process::run(project_dir, &standalone.run, &specs, interrupt)?;
+    let reported = process::run(project_dir, &standalone.run, &specs, standalone.timeout, interrupt)?;
 
     serde_json::from_str(&reported).map_err(|error| format!("couldn't read what the run reported: {error}"))
 }
@@ -105,6 +107,7 @@ mod tests {
             lib: "submodules/litmus/lib".to_owned(),
             specs: vec!["tests".to_owned()],
             adapter: None,
+            timeout: 300,
             flags: vec!["coverage".to_owned()],
             specs_at_once: None,
         }
