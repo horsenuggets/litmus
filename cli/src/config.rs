@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn refuses_invalid_standalone_timeouts() {
-        for timeout in ["-1", "1.5", "\"900\"", "true", "[]", "9223372036854775808"] {
+        for timeout in ["-1", "1.5", "\"900\"", "true", "[]", "18446744073709551616"] {
             let text = STANDALONE.replace("timeout = 300", &format!("timeout = {timeout}"));
             let problem = Config::parse(&text).unwrap_err();
 
@@ -190,15 +190,16 @@ mod tests {
 
     #[test]
     fn standalone_timeouts_follow_platform_clock_limits() {
-        let timeout = i64::MAX as u64;
-        let text = STANDALONE.replace("timeout = 300", &format!("timeout = {timeout}"));
-        let parsed = Config::parse(&text);
-        let fits = std::time::Instant::now().checked_add(std::time::Duration::from_secs(timeout)).is_some();
-        if fits {
-            assert_eq!(parsed.unwrap().standalone().unwrap().timeout, timeout);
-        } else {
-            let problem = parsed.unwrap_err();
-            assert!(problem.contains("timeout"), "{problem}");
+        for timeout in [i64::MAX as u64, i64::MAX as u64 + 1, u64::MAX] {
+            let text = STANDALONE.replace("timeout = 300", &format!("timeout = {timeout}"));
+            let parsed = Config::parse(&text);
+            let fits = std::time::Instant::now().checked_add(std::time::Duration::from_secs(timeout)).is_some();
+            if fits {
+                assert_eq!(parsed.unwrap().standalone().unwrap().timeout, timeout);
+            } else {
+                let problem = parsed.unwrap_err();
+                assert!(problem.contains("timeout"), "{problem}");
+            }
         }
     }
 

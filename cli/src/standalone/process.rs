@@ -554,7 +554,10 @@ mod tests {
                 thread::sleep(Duration::from_millis(10));
             }
         }
-        if matches!(mode.as_str(), "results" | "inactive" | "interrupt-results") {
+        if mode == "delayed-results" {
+            thread::sleep(Duration::from_millis(1200));
+        }
+        if matches!(mode.as_str(), "results" | "inactive" | "interrupt-results" | "delayed-results") {
             println!("\n{MARKER}{{\"specs\":[]}}");
             std::io::stdout().flush().unwrap();
         }
@@ -589,6 +592,10 @@ mod tests {
     }
 
     fn cleaned_up(mode: &str) -> Result<String, String> {
+        cleaned_up_with_timeout(mode, 5)
+    }
+
+    fn cleaned_up_with_timeout(mode: &str, timeout: u64) -> Result<String, String> {
         let project = TempProject::new(&format!("process-cleanup-{mode}"));
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -604,7 +611,7 @@ mod tests {
             let project = &project;
             let command = &command;
             let runner = scope.spawn(move || {
-                let result = run(project, command, &[], 5, &Interrupt::default());
+                let result = run(project, command, &[], timeout, &Interrupt::default());
                 let _ = finished.send(result);
             });
             let deadline = Instant::now() + Duration::from_secs(3);
@@ -699,6 +706,13 @@ mod tests {
     }
 
     #[test]
+    fn disabled_deadlines_allow_delayed_results_and_still_clean_up_the_runtime() {
+        let started = Instant::now();
+        assert_eq!(cleaned_up_with_timeout("delayed-results", 0).unwrap(), "{\"specs\":[]}");
+        assert!(started.elapsed() >= Duration::from_millis(1200));
+    }
+
+    #[test]
     fn keeps_results_printed_just_before_the_wrapper_exits() {
         assert_eq!(cleaned_up("exited-results").unwrap(), "{\"specs\":[]}");
     }
@@ -750,11 +764,15 @@ mod tests {
     }
 
     pub(super) fn termination_case(signal: Option<i32>, mode: &str) {
+        termination_case_with_timeout(signal, mode, 300);
+    }
+
+    fn termination_case_with_timeout(signal: Option<i32>, mode: &str, timeout: u64) {
         #[cfg(unix)]
         use std::os::unix::process::{CommandExt, ExitStatusExt};
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
-        let project = TempProject::new(&format!("process-{signal:?}-{mode}"));
+        let project = TempProject::new(&format!("process-{signal:?}-{mode}-{timeout}"));
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
         project.write("address", &listener.local_addr().unwrap().to_string());
@@ -766,7 +784,7 @@ mod tests {
         project.write("tests/a.spec.luau", "");
         project.write(
             "litmus.toml",
-            &format!("[standalone]\nrun = {}\ntimeout = 300\nlib = \"lib\"\nspecs = [\"tests\"]\n", serde_json::to_string(&wrapper_run()).unwrap()),
+            &format!("[standalone]\nrun = {}\ntimeout = {timeout}\nlib = \"lib\"\nspecs = [\"tests\"]\n", serde_json::to_string(&wrapper_run()).unwrap()),
         );
         let mut command = fixture_command("standalone::process::tests::interrupt_fixture");
         #[cfg(unix)]
@@ -939,6 +957,17 @@ mod tests {
         let _ = child.wait();
         if let Err(problem) = outcome {
             resume_unwind(problem);
+        }
+    }
+
+    #[test]
+    fn disabled_deadlines_preserve_native_interruption_and_process_cleanup() {
+        #[cfg(unix)]
+        let signal = libc::SIGINT;
+        #[cfg(windows)]
+        let signal = 0xC000013A_u32 as i32;
+        for mode in ["interrupt", "interrupt-results", "blocked-output"] {
+            termination_case_with_timeout(Some(signal), mode, 0);
         }
     }
 
