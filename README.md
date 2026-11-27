@@ -121,6 +121,7 @@ build = "build.rbxl"
 
 [standalone]
 run = ["lune", "run"]
+timeout = 300
 lib = "litmus/lib"
 specs = ["tests"]
 adapter = "tests/Adapter.luau"
@@ -129,7 +130,12 @@ flags = ["coverage"]
 
 - **`[rojo]`**: `project` is the Rojo project a plugin or cloud run reads the place from, when it isn't the default one.
 - **`[cloud]`**: `universe` and `place` name the experience and its place. Each run saves the project as a new, unpublished version of that place. `build` is a `.rbxl` to use as that version, for when Rojo alone doesn't build the whole place.
-- **`[standalone]`**: `run` is the command that runs a Luau file, `lib` is the folder of litmus's lib, and `specs` is where to look for `.spec` files. `adapter` and `flags` are for a project with an adapter of its own.
+- **`[standalone]`** → `run` is the command that runs a Luau file, `lib` is the folder of
+  litmus's lib, and `specs` is where to look for `.spec` files. `adapter` and `flags` are
+  for a project with an adapter of its own. The required `timeout` is the whole-process
+  limit in seconds, including setup, execution and result reporting. Set it to `0` to
+  disable the deadline. Negative, fractional and unrepresentable values are rejected.
+  Progress events do not reset the deadline, and `timeout` is not an adapter flag.
 
 A cloud run also needs an Open Cloud API key in `LITMUS_API_KEY`, read from the environment or else from the project's `.env`. Keep `.env` out of version control.
 

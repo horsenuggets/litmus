@@ -1,9 +1,6 @@
-[cloud]
-universe = 10756976039
-place = 109535589334533
-
 [standalone]
 run = ["lune", "run"]
+timeout = 300
 lib = "lib"
 
 specs = ["tests"]

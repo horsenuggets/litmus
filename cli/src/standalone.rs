@@ -2,6 +2,7 @@ mod harness;
 mod process;
 mod specs;
 
+use crate::interrupt::Interrupt;
 use crate::selection::{Selection, relative};
 use serde::Deserialize;
 use serde_json::Value;
@@ -22,12 +23,14 @@ pub struct Standalone {
     pub lib: String,
     pub specs: Vec<String>,
     pub adapter: Option<String>,
+    pub timeout: u64,
     #[serde(default)]
     pub flags: Vec<String>,
 }
 
 impl Standalone {
     pub fn check(&self) -> Result<(), String> {
+        process::deadline(std::time::Instant::now(), self.timeout)?;
         if self.run.first().is_none_or(String::is_empty) {
             return Err("`run` has to start with the command that runs a Luau file, as in [\"lune\", \"run\"]".to_owned());
         }
@@ -52,7 +55,13 @@ impl Standalone {
     }
 }
 
-pub fn run(project_dir: &Path, standalone: &Standalone, flags: &[String], selection: &Selection) -> Result<Value, String> {
+pub fn run(
+    project_dir: &Path,
+    standalone: &Standalone,
+    flags: &[String],
+    selection: &Selection,
+    interrupt: &Interrupt,
+) -> Result<Value, String> {
     if let Some(flag) = flags.iter().find(|flag| !standalone.flags.contains(flag)) {
         return Err(format!("--{flag} isn't a flag litmus.toml lists under [standalone]"));
     }
@@ -71,7 +80,7 @@ pub fn run(project_dir: &Path, standalone: &Standalone, flags: &[String], select
         .and_then(|()| fs::write(folder.join(SCRIPT), script))
         .map_err(|error| format!("couldn't write {FOLDER}/{SCRIPT}: {error}"))?;
 
-    let reported = process::run(project_dir, &standalone.run, &specs)?;
+    let reported = process::run(project_dir, &standalone.run, &specs, standalone.timeout, interrupt)?;
 
     serde_json::from_str(&reported).map_err(|error| format!("couldn't read what the run reported: {error}"))
 }
@@ -95,6 +104,7 @@ mod tests {
             lib: "submodules/litmus/lib".to_owned(),
             specs: vec!["tests".to_owned()],
             adapter: None,
+            timeout: 300,
             flags: vec!["coverage".to_owned()],
         }
     }
@@ -144,8 +154,14 @@ mod tests {
 
     #[test]
     fn refuses_a_flag_the_project_never_listed() {
-        let problem = run(Path::new("a folder that doesn't exist"), &standalone(), &["verbose".to_owned()], &Selection::default())
-            .unwrap_err();
+        let problem = run(
+            Path::new("a folder that doesn't exist"),
+            &standalone(),
+            &["verbose".to_owned()],
+            &Selection::default(),
+            &Interrupt::default(),
+        )
+        .unwrap_err();
 
         assert!(problem.contains("--verbose"), "{problem}");
     }
@@ -159,7 +175,7 @@ mod tests {
             ..standalone()
         };
 
-        let reported = run(&dir, &standalone, &[], &Selection::default());
+        let reported = run(&dir, &standalone, &[], &Selection::default(), &Interrupt::default());
         let written = fs::read_to_string(dir.join(".litmus/run.luau"));
 
         assert_eq!(reported, Ok(serde_json::json!({ "specs": [] })));
@@ -180,7 +196,7 @@ mod tests {
         };
 
         let started = std::time::Instant::now();
-        let reported = run(&dir, &standalone, &[], &Selection::default());
+        let reported = run(&dir, &standalone, &[], &Selection::default(), &Interrupt::default());
 
         assert_eq!(reported, Ok(serde_json::json!({ "specs": [] })));
         assert!(started.elapsed() < std::time::Duration::from_secs(30), "{:?}", started.elapsed());
@@ -195,7 +211,7 @@ mod tests {
             ..standalone()
         };
 
-        let problem = run(&dir, &standalone, &[], &Selection::default()).unwrap_err();
+        let problem = run(&dir, &standalone, &[], &Selection::default(), &Interrupt::default()).unwrap_err();
 
         assert!(problem.contains("without reporting any results"), "{problem}");
     }
