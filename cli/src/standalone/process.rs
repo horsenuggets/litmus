@@ -927,7 +927,7 @@ mod tests {
                         error.kind(),
                         std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::ConnectionReset
                     )),
-                "The terminated runtime survived ({mode}, {read:?})."
+                "The runtime lifetime socket remained open ({mode}, {read:?}). CLI exit status was {status:?}."
             );
             let status = status.expect("The terminated CLI did not exit.");
             #[cfg(unix)]
