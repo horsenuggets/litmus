@@ -1,6 +1,6 @@
 [package]
 name = "litmus"
-version = "0.4.0"
+version = "0.4.0-horse.1.0"
 edition = "2024"
 description = "A test runner for Luau and Roblox projects"
 license = "MIT"
@@ -9,6 +9,7 @@ repository = "https://github.com/wobletstudios/litmus"
 [dependencies]
 anstream = "0.6"
 anstyle = "1"
+process-wrap = { version = "11", default-features = false, features = ["job-object", "kill-on-drop", "process-group", "std"] }
 rbx_binary = "3"
 rbx_dom_weak = "4"
 serde = { version = "1", features = ["derive"] }
@@ -18,3 +19,10 @@ terminal_size = "0.4"
 tiny_http = "0.12"
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+signal-hook = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+ctrlc = "3.5"
