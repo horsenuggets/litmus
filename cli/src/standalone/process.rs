@@ -596,6 +596,63 @@ mod tests {
         assert_eq!(refused.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
+    #[test]
+    fn cleanup_waits_poll_until_a_pending_launcher_exits() {
+        let expected = exited();
+        let mut observations = [None, None, Some(expected)].into_iter();
+        let guard = Instant::now() + Duration::from_secs(5);
+        let status = wait_for_exit(
+            || {
+                assert!(Instant::now() < guard, "Polling did not finish before the bounded guard.");
+                Ok(observations.next().expect("Polling continued after the launcher exited."))
+            },
+            guard,
+        )
+        .unwrap();
+
+        assert_eq!(status, expected);
+        assert_eq!(observations.next(), None, "The launcher exit must be observed after the pending polls.");
+    }
+
+    #[test]
+    fn cleanup_waits_propagate_an_error_after_pending_polls() {
+        let expected = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "The delayed poll failed.");
+        let mut observations = [Ok(None), Ok(None), Err(expected)].into_iter();
+        let guard = Instant::now() + Duration::from_secs(5);
+        let problem = wait_for_exit(
+            || {
+                assert!(Instant::now() < guard, "Polling did not finish before the bounded guard.");
+                observations.next().expect("Polling continued after the launcher observation failed.")
+            },
+            guard,
+        )
+        .unwrap_err();
+
+        assert_eq!(problem.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(problem.to_string(), "The delayed poll failed.");
+        assert!(observations.next().is_none(), "The delayed error must be observed after the pending polls.");
+    }
+
+    #[test]
+    fn cleanup_waits_time_out_when_a_launcher_remains_pending_until_a_future_deadline() {
+        let started = Instant::now();
+        let deadline = started + TICK * 2;
+        let guard = started + Duration::from_secs(5);
+        let problem = wait_for_exit(
+            || {
+                assert!(Instant::now() < guard, "Polling ignored the cleanup deadline.");
+                Ok(None)
+            },
+            deadline,
+        )
+        .unwrap_err();
+
+        assert_eq!(problem.kind(), std::io::ErrorKind::TimedOut);
+        let finished = Instant::now();
+        assert!(finished >= deadline, "Cleanup timed out before the future deadline.");
+        assert!(finished < guard, "Cleanup exceeded the bounded guard.");
+    }
+
     #[cfg(unix)]
     fn with_native_child(mut child: std::process::Child, test: impl FnOnce(&mut std::process::Child)) {
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
@@ -628,10 +685,14 @@ mod tests {
                 assert!(Instant::now() < deadline, "The launcher did not exit.");
                 thread::sleep(Duration::from_millis(10));
             }
+            let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+            // Bypass Child's cached status to prove that polling left the PID unreaped.
+            // WNOWAIT also leaves with_native_child responsible for the final reap.
+            let result = unsafe { libc::waitid(libc::P_PID, child.id(), &mut info, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) };
+            assert_eq!(result, 0, "The unreaped launcher could not be observed ({}).", std::io::Error::last_os_error());
+            assert_eq!(unsafe { info.si_pid() }, child.id() as libc::pid_t, "Polling must leave the exited launcher waitable.");
             #[cfg(target_os = "macos")]
             assert!(only_zombie_launcher(child), "The reserved zombie must not be mistaken for a live process tree.");
-            // A second native wait must still find the zombie, rather than ECHILD.
-            // Use the native child so its cached status also makes failure cleanup safe.
             assert!(child.try_wait().unwrap().expect("Polling reaped the process-group leader early.").success());
         });
     }
@@ -643,6 +704,28 @@ mod tests {
 
         let child = Command::new("sh").args(["-c", "exec sleep 60"]).process_group(0).spawn().unwrap();
         with_native_child(child, |child| assert!(!only_zombie_launcher(child)));
+    }
+
+    #[test]
+    fn owned_cleanup_caches_its_first_real_stop_and_releases_the_child() {
+        // The native harness help command is self-contained, spawns no descendants,
+        // and exits on its own even if cleanup regresses.
+        let mut command = CommandWrap::with_new(std::env::current_exe().unwrap(), |command| {
+            command.arg("--help").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        });
+        #[cfg(unix)]
+        command.wrap(ProcessGroup::leader());
+        #[cfg(windows)]
+        command.wrap(JobObject);
+        command.wrap(KillOnDrop);
+        let mut owned = OwnedChild { child: Some(command.spawn().unwrap()), stopped: None };
+
+        let first = owned.stop("the owned native fixture");
+
+        assert!(first.is_ok(), "The first real cleanup failed ({first:?}).");
+        assert_eq!(owned.stopped.as_ref(), Some(&first), "The first cleanup outcome must be cached.");
+        assert!(owned.child.is_none(), "The first cleanup must take ownership of the child.");
+        assert_eq!(owned.stop("the fixture without a child"), first);
     }
 
     #[test]
