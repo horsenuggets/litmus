@@ -1,5 +1,6 @@
 [standalone]
 run = ["lune", "run"]
+timeout = 0
 lib = "../../lib"
 specs = ["tests"]
 adapter = "adapter.luau"

@@ -58,8 +58,9 @@ litmus.toml:
   [cloud]             The experience and its place, as `universe` and `place`; and as `build`, a .rbxl to use as
                       the new version, when Rojo alone doesn't build the whole place
   [standalone]        The command that runs a Luau file, as `run`; the folder of litmus's lib, as `lib`; where to
-                      look for .spec files, as `specs`; and for a project with an adapter of its own, that file
-                      as `adapter` and the flags it takes as `flags`
+                      look for .spec files, as `specs`; the required whole-process limit in seconds, as `timeout`
+                      (0 disables it); and for a project with an adapter of its own, that file as `adapter` and
+                      the flags it takes as `flags`
 
 A cloud run also needs:
   LITMUS_API_KEY      The Open Cloud API key to run under, read from the environment, or else from the project's .env

@@ -23,7 +23,6 @@ unsafe extern "C" {
     fn proc_listpgrppids(group: libc::pid_t, buffer: *mut std::ffi::c_void, size: libc::c_int) -> libc::c_int;
 }
 
-const BUDGET: Duration = Duration::from_secs(300);
 const CLEANUP_BUDGET: Duration = Duration::from_secs(1);
 const TICK: Duration = Duration::from_millis(100);
 
@@ -32,6 +31,29 @@ enum Message {
     Printed(String),
     Event(Event),
     Results(String),
+}
+
+pub(super) fn deadline(started: Instant, timeout: u64) -> Result<Option<Instant>, String> {
+    if timeout == 0 {
+        return Ok(None);
+    }
+
+    started
+        .checked_add(Duration::from_secs(timeout))
+        .map(Some)
+        .ok_or_else(|| format!("The standalone timeout of {timeout} seconds is too large for this platform."))
+}
+
+fn poll_interval(deadline: Option<Instant>, now: Instant) -> Duration {
+    match deadline {
+        Some(deadline) => deadline.saturating_duration_since(now).min(TICK),
+        None => TICK,
+    }
+}
+
+fn collection_deadline(execution: Option<Instant>, now: Instant) -> Instant {
+    let limit = now + Duration::from_secs(1);
+    execution.map_or(limit, |execution| execution.min(limit))
 }
 
 struct OwnedChild {
@@ -72,20 +94,11 @@ impl Drop for Watchdog {
     }
 }
 
-pub fn run(project_dir: &Path, run: &[String], specs: &[String], interrupt: &Interrupt) -> Result<String, String> {
-    run_with_budget(project_dir, run, specs, BUDGET, interrupt)
-}
-
-fn run_with_budget(
-    project_dir: &Path,
-    run: &[String],
-    specs: &[String],
-    budget: Duration,
-    interrupt: &Interrupt,
-) -> Result<String, String> {
+pub fn run(project_dir: &Path, run: &[String], specs: &[String], timeout: u64, interrupt: &Interrupt) -> Result<String, String> {
     let script = format!("{FOLDER}/{SCRIPT}");
     let shown = format!("{} {script}", run.join(" "));
-    let deadline = Instant::now() + budget;
+    let deadline = deadline(Instant::now(), timeout)?;
+    let budget = Duration::from_secs(timeout);
 
     let mut command = CommandWrap::with_new(&run[0], |command| {
         command.args(&run[1..]).arg(&script).current_dir(project_dir).stdin(Stdio::null()).stdout(Stdio::piped());
@@ -117,44 +130,52 @@ fn run_with_budget(
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || relay(BufReader::new(output), |message| sender.send(message).is_ok()));
 
-    let (finished, completion) = mpsc::channel();
-    let timed_child = Arc::downgrade(&child);
-    let timed_command = shown.clone();
-    let worker = thread::spawn(move || {
-        if matches!(completion.recv_timeout(deadline.saturating_duration_since(Instant::now())), Err(RecvTimeoutError::Timeout))
-            && let Some(child) = timed_child.upgrade()
-        {
-            // Cleanup cannot depend on the output consumer continuing to read stdout.
-            let _ = child.lock().unwrap().stop(&timed_command);
-        }
+    let _watchdog = deadline.map(|deadline| {
+        let (finished, completion) = mpsc::channel();
+        let timed_child = Arc::downgrade(&child);
+        let timed_command = shown.clone();
+        let worker = thread::spawn(move || {
+            if matches!(completion.recv_timeout(deadline.saturating_duration_since(Instant::now())), Err(RecvTimeoutError::Timeout))
+                && let Some(child) = timed_child.upgrade()
+            {
+                // Cleanup cannot depend on the output consumer continuing to read stdout.
+                let _ = child.lock().unwrap().stop(&timed_command);
+            }
+        });
+        Watchdog { finished, worker: Some(worker) }
     });
-    let _watchdog = Watchdog { finished, worker: Some(worker) };
     let mut display = Display::new(specs.to_vec());
+    let mut output_closed = false;
 
     let mut reported = loop {
         if interrupt.cancelled() {
             break Ok(None);
         }
-        let wait = deadline.saturating_duration_since(Instant::now()).min(TICK);
+        let wait = poll_interval(deadline, Instant::now());
         if wait.is_zero() {
             break Err(format!("`{shown}` was stopped, still running after {}", in_words(budget)));
         }
-        let message = receiver.recv_timeout(wait);
+        let message = if output_closed {
+            thread::sleep(wait);
+            None
+        } else {
+            Some(receiver.recv_timeout(wait))
+        };
         if interrupt.cancelled() {
             break Ok(None);
         }
-        if Instant::now() >= deadline {
+        if poll_interval(deadline, Instant::now()).is_zero() {
             break Err(format!("`{shown}` was stopped, still running after {}", in_words(budget)));
         }
         match message {
-            Ok(Message::Printed(line)) => display.print(&line),
-            Ok(Message::Event(event)) => display.take(event),
-            Ok(Message::Results(results)) => break Ok(Some(results)),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => break Ok(None),
+            Some(Ok(Message::Printed(line))) => display.print(&line),
+            Some(Ok(Message::Event(event))) => display.take(event),
+            Some(Ok(Message::Results(results))) => break Ok(Some(results)),
+            Some(Err(RecvTimeoutError::Disconnected)) => output_closed = true,
+            Some(Err(RecvTimeoutError::Timeout)) | None => {}
         }
 
-        if Instant::now() >= deadline {
+        if poll_interval(deadline, Instant::now()).is_zero() {
             break Err(format!("`{shown}` was stopped, still running after {}", in_words(budget)));
         }
 
@@ -186,11 +207,19 @@ fn run_with_budget(
         owned.stop(&shown)
     };
     if reported.is_ok() {
-        let drain_deadline = Instant::now() + Duration::from_secs(1);
+        let drain_deadline = collection_deadline(deadline, Instant::now());
         // Collect before replaying logs so output backpressure cannot hide queued results.
         let mut pending = Vec::new();
-        while Instant::now() < drain_deadline && !interrupt.cancelled() {
-            match receiver.recv_timeout(TICK) {
+        while !interrupt.cancelled() {
+            let wait = poll_interval(Some(drain_deadline), Instant::now());
+            if wait.is_zero() {
+                break;
+            }
+            let message = receiver.recv_timeout(wait);
+            if poll_interval(Some(drain_deadline), Instant::now()).is_zero() {
+                break;
+            }
+            match message {
                 Ok(message) => {
                     let last = matches!(message, Message::Results(_));
                     pending.push(message);
@@ -525,7 +554,10 @@ mod tests {
                 thread::sleep(Duration::from_millis(10));
             }
         }
-        if matches!(mode.as_str(), "results" | "inactive" | "interrupt-results") {
+        if mode == "delayed-results" {
+            thread::sleep(Duration::from_millis(1200));
+        }
+        if matches!(mode.as_str(), "results" | "inactive" | "interrupt-results" | "delayed-results") {
             println!("\n{MARKER}{{\"specs\":[]}}");
             std::io::stdout().flush().unwrap();
         }
@@ -560,6 +592,10 @@ mod tests {
     }
 
     fn cleaned_up(mode: &str) -> Result<String, String> {
+        cleaned_up_with_timeout(mode, 5)
+    }
+
+    fn cleaned_up_with_timeout(mode: &str, timeout: u64) -> Result<String, String> {
         let project = TempProject::new(&format!("process-cleanup-{mode}"));
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -575,7 +611,7 @@ mod tests {
             let project = &project;
             let command = &command;
             let runner = scope.spawn(move || {
-                let result = run_with_budget(project, command, &[], Duration::from_secs(5), &Interrupt::default());
+                let result = run(project, command, &[], timeout, &Interrupt::default());
                 let _ = finished.send(result);
             });
             let deadline = Instant::now() + Duration::from_secs(3);
@@ -670,6 +706,13 @@ mod tests {
     }
 
     #[test]
+    fn disabled_deadlines_allow_delayed_results_and_still_clean_up_the_runtime() {
+        let started = Instant::now();
+        assert_eq!(cleaned_up_with_timeout("delayed-results", 0).unwrap(), "{\"specs\":[]}");
+        assert!(started.elapsed() >= Duration::from_millis(1200));
+    }
+
+    #[test]
     fn keeps_results_printed_just_before_the_wrapper_exits() {
         assert_eq!(cleaned_up("exited-results").unwrap(), "{\"specs\":[]}");
     }
@@ -708,7 +751,7 @@ mod tests {
             super::windows_tests::ignore_ctrl_c(false);
         }
         if mode == "timeout-output" {
-            let outcome = run_with_budget(Path::new("."), &wrapper_run(), &[], Duration::from_secs(1), &Interrupt::default());
+            let outcome = run(Path::new("."), &wrapper_run(), &[], 1, &Interrupt::default());
             std::process::exit(if outcome.is_err() { 2 } else { 0 });
         }
         let command = crate::Command::parse(&["test", "--standalone"]).unwrap();
@@ -721,11 +764,15 @@ mod tests {
     }
 
     pub(super) fn termination_case(signal: Option<i32>, mode: &str) {
+        termination_case_with_timeout(signal, mode, 300);
+    }
+
+    fn termination_case_with_timeout(signal: Option<i32>, mode: &str, timeout: u64) {
         #[cfg(unix)]
         use std::os::unix::process::{CommandExt, ExitStatusExt};
         use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
-        let project = TempProject::new(&format!("process-{signal:?}-{mode}"));
+        let project = TempProject::new(&format!("process-{signal:?}-{mode}-{timeout}"));
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
         project.write("address", &listener.local_addr().unwrap().to_string());
@@ -737,7 +784,7 @@ mod tests {
         project.write("tests/a.spec.luau", "");
         project.write(
             "litmus.toml",
-            &format!("[standalone]\nrun = {}\nlib = \"lib\"\nspecs = [\"tests\"]\n", serde_json::to_string(&wrapper_run()).unwrap()),
+            &format!("[standalone]\nrun = {}\ntimeout = {timeout}\nlib = \"lib\"\nspecs = [\"tests\"]\n", serde_json::to_string(&wrapper_run()).unwrap()),
         );
         let mut command = fixture_command("standalone::process::tests::interrupt_fixture");
         #[cfg(unix)]
@@ -880,7 +927,7 @@ mod tests {
                         error.kind(),
                         std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::ConnectionReset
                     )),
-                "The terminated runtime survived ({mode}, {read:?})."
+                "The runtime lifetime socket remained open ({mode}, {read:?}). CLI exit status was {status:?}."
             );
             let status = status.expect("The terminated CLI did not exit.");
             #[cfg(unix)]
@@ -910,6 +957,17 @@ mod tests {
         let _ = child.wait();
         if let Err(problem) = outcome {
             resume_unwind(problem);
+        }
+    }
+
+    #[test]
+    fn disabled_deadlines_preserve_native_interruption_and_process_cleanup() {
+        #[cfg(unix)]
+        let signal = libc::SIGINT;
+        #[cfg(windows)]
+        let signal = 0xC000013A_u32 as i32;
+        for mode in ["interrupt", "interrupt-results", "blocked-output"] {
+            termination_case_with_timeout(Some(signal), mode, 0);
         }
     }
 
@@ -1003,9 +1061,120 @@ mod tests {
     }
 
     #[test]
+    fn a_disabled_deadline_has_no_expiry() {
+        let started = Instant::now();
+
+        assert_eq!(deadline(started, 0), Ok(None));
+    }
+
+    #[test]
+    fn a_configured_deadline_uses_exact_seconds() {
+        let started = Instant::now();
+
+        for timeout in [1, 300, 900] {
+            let expires = deadline(started, timeout).unwrap().unwrap();
+
+            assert_eq!(expires.duration_since(started), Duration::from_secs(timeout));
+            assert!(started < expires);
+            assert!(started + Duration::from_secs(timeout) >= expires);
+        }
+    }
+
+    #[test]
+    fn polling_never_waits_past_expiry_or_accepts_the_exact_boundary() {
+        let now = Instant::now();
+
+        assert_eq!(poll_interval(None, now), TICK);
+        assert_eq!(poll_interval(Some(now + Duration::from_secs(1)), now), TICK);
+        assert_eq!(poll_interval(Some(now + Duration::from_millis(25)), now), Duration::from_millis(25));
+        assert_eq!(poll_interval(Some(now), now), Duration::ZERO);
+        assert_eq!(poll_interval(Some(now), now + Duration::from_millis(1)), Duration::ZERO);
+    }
+
+    #[test]
+    fn final_collection_cannot_extend_the_execution_deadline() {
+        let now = Instant::now();
+        assert_eq!(collection_deadline(None, now), now + Duration::from_secs(1));
+        assert_eq!(collection_deadline(Some(now + Duration::from_secs(5)), now), now + Duration::from_secs(1));
+        assert_eq!(collection_deadline(Some(now + Duration::from_millis(25)), now), now + Duration::from_millis(25));
+        assert_eq!(collection_deadline(Some(now), now), now);
+        assert_eq!(collection_deadline(Some(now - Duration::from_millis(1)), now), now - Duration::from_millis(1));
+    }
+
+    #[test]
+    fn a_deadline_that_does_not_fit_is_an_error_instead_of_a_panic() {
+        let started = Instant::now();
+        let timeout = u64::MAX;
+
+        assert!(started.checked_add(Duration::from_secs(timeout)).is_none());
+        let problem = deadline(started, timeout).unwrap_err();
+        assert!(problem.contains("timeout") && problem.contains(&timeout.to_string()), "{problem}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_silent_command_stops_at_the_configured_deadline() {
+        let dir = crate::testing::TempProject::new("silent-deadline");
+        let command = ["sh".to_owned(), "-c".to_owned(), "exec sleep 60".to_owned()];
+        let problem = run(&dir, &command, &[], 1, &Interrupt::default()).unwrap_err();
+
+        assert!(problem.contains("after 1 second"), "{problem}");
+        assert!(!problem.contains("after 1 seconds"), "{problem}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn progress_does_not_replace_the_configured_deadline() {
+        let dir = crate::testing::TempProject::new("progress-deadline");
+        let command = [
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "for tick in 1 2 3 4 5 6 7 8; do printf '%s\\n' '@@litmus-progress@@{\"kind\":\"settled\"}'; sleep 0.25; done; printf '%s\\n' '@@litmus-run@@{\"specs\":[]}'".to_owned(),
+        ];
+        let started = Instant::now();
+        let problem = run(&dir, &command, &[], 1, &Interrupt::default()).unwrap_err();
+
+        assert!(problem.contains("after 1 second"), "{problem}");
+        assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_result_after_expiry_is_not_accepted_during_a_receive_tick() {
+        let dir = crate::testing::TempProject::new("late-result-deadline");
+        let command = [
+            "sh".to_owned(),
+            "-c".to_owned(),
+            "sleep 0.95; printf '%s\\n' '@@litmus-progress@@{\"kind\":\"settled\"}'; sleep 0.1; printf '%s\\n' '@@litmus-run@@{\"specs\":[]}'".to_owned(),
+        ];
+        let problem = run(&dir, &command, &[], 1, &Interrupt::default()).unwrap_err();
+
+        assert!(problem.contains("after 1 second"), "{problem}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn closing_stdout_does_not_escape_the_deadline() {
+        let dir = crate::testing::TempProject::new("closed-output-deadline");
+        let command = ["sh".to_owned(), "-c".to_owned(), "exec 1>&-; exec sleep 60".to_owned()];
+        let problem = run(&dir, &command, &[], 1, &Interrupt::default()).unwrap_err();
+
+        assert!(problem.contains("after 1 second"), "{problem}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_disabled_timeout_accepts_a_result_after_a_short_deadline_would_expire() {
+        let dir = crate::testing::TempProject::new("disabled-deadline");
+        let command = ["sh".to_owned(), "-c".to_owned(), "sleep 2; printf '%s\\n' '@@litmus-run@@{\"specs\":[]}'".to_owned()];
+
+        assert_eq!(run(&dir, &command, &[], 0, &Interrupt::default()), Ok("{\"specs\":[]}".to_owned()));
+    }
+
+    #[test]
     fn a_command_that_cannot_start_is_named() {
         let command = ["litmus-no-such-command".to_owned(), "run".to_owned()];
-        let problem = run(Path::new("."), &command, &[], &Interrupt::default()).unwrap_err();
+        let problem = run(Path::new("."), &command, &[], 300, &Interrupt::default()).unwrap_err();
 
         assert!(problem.contains("`litmus-no-such-command run .litmus/run.luau`"), "{problem}");
     }
