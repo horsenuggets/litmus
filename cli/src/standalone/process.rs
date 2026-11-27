@@ -105,7 +105,7 @@ fn run_with_budget(
     let deadline = Instant::now() + budget;
     let mut display = Display::new(specs.to_vec());
 
-    let mut reported = loop {
+    let reported = loop {
         if interrupt.cancelled() {
             break Ok(None);
         }
@@ -148,43 +148,41 @@ fn run_with_budget(
         let mut owned = child.lock().unwrap();
         owned.stop(&shown)
     };
-    reported = collect_report(reported, || {
-        let drain_deadline = Instant::now() + Duration::from_secs(1);
-        // Collect before replaying logs so output backpressure cannot hide queued results.
-        let mut pending = Vec::new();
-        while Instant::now() < drain_deadline && !interrupt.cancelled() {
-            match receiver.recv_timeout(TICK) {
-                Ok(message) => {
-                    let last = matches!(message, Message::Results(_));
-                    pending.push(message);
-                    if last {
-                        break;
+    finalize_report(
+        &shown,
+        reported,
+        stopped,
+        || {
+            let drain_deadline = Instant::now() + Duration::from_secs(1);
+            // Collect before replaying logs so output backpressure cannot hide queued results.
+            let mut pending = Vec::new();
+            while Instant::now() < drain_deadline && !interrupt.cancelled() {
+                match receiver.recv_timeout(TICK) {
+                    Ok(message) => {
+                        let last = matches!(message, Message::Results(_));
+                        pending.push(message);
+                        if last {
+                            break;
+                        }
                     }
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => break,
                 }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
             }
-        }
-        let mut final_report = None;
-        for message in pending {
-            match message {
-                Message::Printed(line) => display.print(&line),
-                Message::Event(event) => display.take(event),
-                Message::Results(results) => final_report = Some(results),
+            let mut final_report = None;
+            for message in pending {
+                match message {
+                    Message::Printed(line) => display.print(&line),
+                    Message::Event(event) => display.take(event),
+                    Message::Results(results) => final_report = Some(results),
+                }
             }
-        }
-        display.finish();
-        final_report
-    });
-    if interrupt.cancelled() {
-        reported = Err("the standalone run was interrupted".to_owned());
-    }
-    let (outcome, warning) = outcome(&shown, reported, stopped);
-    if let Some(warning) = warning {
-        eprintln!("litmus: {warning}");
-    }
-
-    outcome
+            display.finish();
+            final_report
+        },
+        || interrupt.cancelled(),
+        |warning| eprintln!("litmus: {warning}"),
+    )
 }
 
 fn launcher_exited(child: &mut std::process::Child) -> std::io::Result<bool> {
@@ -303,6 +301,25 @@ fn wait_for_exit(
         }
         thread::sleep(wait);
     }
+}
+
+fn finalize_report(
+    shown: &str,
+    reported: Result<Option<String>, String>,
+    stopped: Result<ExitStatus, String>,
+    collect: impl FnOnce() -> Option<String>,
+    cancelled: impl FnOnce() -> bool,
+    emit_warning: impl FnOnce(&str),
+) -> Result<String, String> {
+    let mut reported = collect_report(reported, collect);
+    if cancelled() {
+        reported = Err("the standalone run was interrupted".to_owned());
+    }
+    let (outcome, warning) = outcome(shown, reported, stopped);
+    if let Some(warning) = warning {
+        emit_warning(&warning);
+    }
+    outcome
 }
 
 fn collect_report(reported: Result<Option<String>, String>, collect: impl FnOnce() -> Option<String>) -> Result<Option<String>, String> {
@@ -991,6 +1008,121 @@ mod tests {
         use std::os::windows::process::ExitStatusExt;
 
         ExitStatus::from_raw(0)
+    }
+
+    #[test]
+    fn finalization_keeps_queued_results_and_emits_the_exact_cleanup_warning() {
+        let payload = "{\"specs\":[]}";
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Message::Results(payload.to_owned())).unwrap();
+        drop(sender);
+        let mut warnings = Vec::new();
+
+        let result = finalize_report(
+            "lune run",
+            Ok(None),
+            Err("couldn't stop it".to_owned()),
+            || match receiver.try_recv().unwrap() {
+                Message::Results(results) => Some(results),
+                message => panic!("Expected queued results, got {message:?}."),
+            },
+            || false,
+            |warning| warnings.push(warning.to_owned()),
+        );
+
+        assert_eq!(result, Ok(payload.to_owned()));
+        assert_eq!(warnings, ["couldn't stop it"]);
+    }
+
+    #[test]
+    fn finalization_obeys_the_reporting_and_cleanup_truth_table() {
+        let payload = "{\"specs\":[]}";
+        for reported in [Ok(None), Ok(Some("accepted results".to_owned())), Err("it timed out".to_owned())] {
+            for queued in [false, true] {
+                for cleanup_succeeded in [false, true] {
+                    let (sender, receiver) = mpsc::channel();
+                    if queued {
+                        sender.send(Message::Results(payload.to_owned())).unwrap();
+                    }
+                    drop(sender);
+                    let mut collected = false;
+                    let mut warnings = Vec::new();
+                    let stopped = if cleanup_succeeded { Ok(exited()) } else { Err("couldn't stop it".to_owned()) };
+                    let result = finalize_report(
+                        "lune run",
+                        reported.clone(),
+                        stopped,
+                        || {
+                            collected = true;
+                            receiver.try_recv().ok().map(|message| match message {
+                                Message::Results(results) => results,
+                                message => panic!("Expected queued results, got {message:?}."),
+                            })
+                        },
+                        || false,
+                        |warning| warnings.push(warning.to_owned()),
+                    );
+                    let expected = match (&reported, queued, cleanup_succeeded) {
+                        (Ok(Some(results)), _, true) => (Ok(results.clone()), vec![]),
+                        (Ok(Some(results)), _, false) => (Ok(results.clone()), vec!["couldn't stop it".to_owned()]),
+                        (Ok(None), true, true) => (Ok(payload.to_owned()), vec![]),
+                        (Ok(None), true, false) => (Ok(payload.to_owned()), vec!["couldn't stop it".to_owned()]),
+                        (Ok(None), false, true) => {
+                            (Err(format!("`lune run` ended without reporting any results ({})", exited())), vec![])
+                        }
+                        (Ok(None), false, false) => {
+                            (Err("`lune run` ended without reporting any results, and couldn't stop it".to_owned()), vec![])
+                        }
+                        (Err(problem), _, true) => (Err(problem.clone()), vec![]),
+                        (Err(problem), _, false) => (Err(format!("{problem}, and couldn't stop it")), vec![]),
+                    };
+
+                    assert_eq!(collected, reported.is_ok(), "{reported:?}, {queued}, {cleanup_succeeded}");
+                    assert_eq!((result, warnings), expected, "{reported:?}, {queued}, {cleanup_succeeded}");
+                    let remaining = if reported.is_err() && queued { vec![Message::Results(payload.to_owned())] } else { vec![] };
+                    assert_eq!(receiver.try_iter().collect::<Vec<_>>(), remaining);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn finalization_cancellation_during_collection_overrides_queued_and_accepted_results() {
+        let payload = "{\"specs\":[]}";
+        for accepted in [None, Some("accepted results".to_owned())] {
+            for cleanup_succeeded in [false, true] {
+                let (sender, receiver) = mpsc::channel();
+                sender.send(Message::Results(payload.to_owned())).unwrap();
+                drop(sender);
+                let cancelled = std::cell::Cell::new(false);
+                let mut warnings = Vec::new();
+                let stopped = if cleanup_succeeded { Ok(exited()) } else { Err("couldn't stop it".to_owned()) };
+                let result = finalize_report(
+                    "lune run",
+                    Ok(accepted.clone()),
+                    stopped,
+                    || {
+                        assert!(!cancelled.get());
+                        let Message::Results(results) = receiver.try_recv().unwrap() else {
+                            panic!("Expected queued results.");
+                        };
+                        cancelled.set(true);
+                        Some(results)
+                    },
+                    || cancelled.get(),
+                    |warning| warnings.push(warning.to_owned()),
+                );
+                let expected = if cleanup_succeeded {
+                    "the standalone run was interrupted"
+                } else {
+                    "the standalone run was interrupted, and couldn't stop it"
+                };
+
+                assert!(cancelled.get(), "Collection must run before checking cancellation.");
+                assert_eq!(result, Err(expected.to_owned()), "{accepted:?}, {cleanup_succeeded}");
+                assert!(warnings.is_empty(), "Cancellation must not emit a results-success warning.");
+            }
+        }
     }
 
     #[test]
