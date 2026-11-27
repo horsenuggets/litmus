@@ -890,7 +890,7 @@ mod tests {
         }
         if mode == "timely-backlog-results" {
             connection.write_all(&[3]).unwrap();
-            // Socket EOF now witnesses native exit, not merely a dropped local stream.
+            // Process-driven socket disconnection witnesses exit, not a dropped stream.
             std::process::exit(0);
         }
         if mode == "retained-reader" {
@@ -1323,15 +1323,21 @@ mod tests {
             }
             let output = if mode == "timely-backlog-results" {
                 // Neither the report nor exit is inferred from a sleep. Require a flushed
-                // report acknowledgement and native socket closure before the earliest
-                // possible execution deadline (which starts after this CLI was spawned).
+                // report acknowledgement and process-driven socket disconnection before
+                // the earliest possible deadline (which starts after this CLI was spawned).
                 connection.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
                 connection.write_all(&[2]).unwrap();
                 let mut reported = [0];
                 connection.read_exact(&mut reported).unwrap();
                 assert_eq!(reported, [3]);
                 assert!(project.join("reported").exists(), "The runtime did not flush its report.");
-                assert_eq!(connection.read(&mut [0]).unwrap(), 0, "The completed runtime did not exit.");
+                let read = connection.read(&mut [0]);
+                assert!(
+                    matches!(read, Ok(0)) || read.as_ref().is_err_and(|error| matches!(
+                        error.kind(), std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::ConnectionReset
+                    )),
+                    "The completed runtime did not exit ({read:?})."
+                );
                 assert!(Instant::now() + TICK < started + Duration::from_secs(timeout), "The report and exit were not timely.");
                 assert!(child.try_wait().unwrap().is_none(), "The CLI must still be blocked on downstream stdout.");
                 // Readiness is observed after run starts, so this target is later than
