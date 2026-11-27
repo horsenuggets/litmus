@@ -9,7 +9,7 @@ use process_wrap::std::{CommandWrap, KillOnDrop};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -119,29 +119,16 @@ fn run_with_budget(
     };
     if stopped.is_ok() {
         let drain_deadline = Instant::now() + Duration::from_secs(1);
-        // Collect before replaying logs so output backpressure cannot hide queued results.
-        let mut pending = Vec::new();
-        while Instant::now() < drain_deadline && !interrupt.cancelled() {
-            match receiver.recv_timeout(TICK) {
-                Ok(message) => {
-                    let last = matches!(message, Message::Results(_));
-                    pending.push(message);
-                    if last {
-                        break;
-                    }
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
-            }
-        }
-        let mut final_report = None;
-        for message in pending {
-            match message {
+        let final_report = collect_and_replay(
+            &receiver,
+            drain_deadline,
+            || interrupt.cancelled(),
+            |message| match message {
                 Message::Printed(line) => display.print(&line),
                 Message::Event(event) => display.take(event),
-                Message::Results(results) => final_report = Some(results),
-            }
-        }
+                Message::Results(_) => unreachable!("Collected results are returned, not forwarded."),
+            },
+        );
         display.finish();
         reported = reported.map(|report| report.or(final_report));
     }
@@ -154,6 +141,36 @@ fn run_with_budget(
     }
 
     outcome
+}
+
+fn collect_and_replay(
+    receiver: &Receiver<Message>,
+    deadline: Instant,
+    mut cancelled: impl FnMut() -> bool,
+    mut forward: impl FnMut(Message),
+) -> Option<String> {
+    // Collect before replaying logs so output backpressure cannot hide queued results.
+    let mut pending = Vec::new();
+    while Instant::now() < deadline && !cancelled() {
+        match receiver.recv_timeout(TICK) {
+            Ok(message) => {
+                let last = matches!(message, Message::Results(_));
+                pending.push(message);
+                if last {
+                    break;
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    for message in pending {
+        match message {
+            Message::Results(results) => return Some(results),
+            message => forward(message),
+        }
+    }
+    None
 }
 
 fn stop_owned(mut child: Box<dyn process_wrap::std::ChildWrapper>, shown: &str) -> Result<ExitStatus, String> {
@@ -304,6 +321,122 @@ mod tests {
         });
 
         assert_eq!(passed, 1);
+    }
+
+    #[test]
+    fn collects_through_results_before_forwarding_any_queued_output() {
+        let (sender, receiver) = mpsc::channel();
+        for message in [
+            printed("first"),
+            Message::Event(Event::Loading { spec: 1 }),
+            printed("second"),
+            printed("second"),
+            Message::Event(Event::Settled),
+            Message::Results("{\"specs\":[]}".to_owned()),
+        ] {
+            sender.send(message).unwrap();
+        }
+        let mut forwarded = Vec::new();
+
+        let results = collect_and_replay(
+            &receiver,
+            Instant::now() + Duration::from_secs(60),
+            || false,
+            |message| {
+                // Even the first callback must see that collection reached the results.
+                assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
+                forwarded.push(message);
+            },
+        );
+
+        assert_eq!(results.as_deref(), Some("{\"specs\":[]}"));
+        assert_eq!(
+            forwarded,
+            [printed("first"), Message::Event(Event::Loading { spec: 1 }), printed("second"), printed("second"), Message::Event(Event::Settled)]
+        );
+    }
+
+    #[test]
+    fn returns_the_first_results_without_consuming_later_queued_messages() {
+        let (sender, receiver) = mpsc::channel();
+        for message in [
+            printed("before"),
+            Message::Results("first results".to_owned()),
+            printed("after"),
+            Message::Event(Event::Settled),
+            Message::Results("later results".to_owned()),
+        ] {
+            sender.send(message).unwrap();
+        }
+        let mut forwarded = Vec::new();
+
+        let results = collect_and_replay(&receiver, Instant::now() + Duration::from_secs(60), || false, |message| forwarded.push(message));
+
+        assert_eq!(results.as_deref(), Some("first results"));
+        assert_eq!(forwarded, [printed("before")]);
+        assert_eq!(
+            receiver.try_iter().collect::<Vec<_>>(),
+            [printed("after"), Message::Event(Event::Settled), Message::Results("later results".to_owned())]
+        );
+    }
+
+    #[test]
+    fn replays_collected_output_when_the_channel_disconnects_without_results() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(printed("first")).unwrap();
+        sender.send(Message::Event(Event::Settled)).unwrap();
+        drop(sender);
+        let mut forwarded = Vec::new();
+
+        let results = collect_and_replay(&receiver, Instant::now() + Duration::from_secs(60), || false, |message| forwarded.push(message));
+
+        assert_eq!(results, None);
+        assert_eq!(forwarded, [printed("first"), Message::Event(Event::Settled)]);
+        assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+    }
+
+    #[test]
+    fn an_expired_collection_deadline_leaves_queued_results_untouched() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(Message::Results("queued results".to_owned())).unwrap();
+
+        let results = collect_and_replay(&receiver, Instant::now(), || false, |_| panic!("Expired collection must not forward output."));
+
+        assert_eq!(results, None);
+        assert_eq!(receiver.try_recv(), Ok(Message::Results("queued results".to_owned())));
+    }
+
+    #[test]
+    fn cancellation_stops_collection_but_replays_already_collected_output() {
+        for collect_count in [0, 2] {
+            let (sender, receiver) = mpsc::channel();
+            sender.send(printed("first")).unwrap();
+            sender.send(Message::Event(Event::Settled)).unwrap();
+            sender.send(Message::Results("queued results".to_owned())).unwrap();
+            let mut checked = 0;
+            let mut forwarded = Vec::new();
+
+            let results = collect_and_replay(
+                &receiver,
+                Instant::now() + Duration::from_secs(60),
+                || {
+                    checked += 1;
+                    checked > collect_count
+                },
+                |message| forwarded.push(message),
+            );
+
+            assert_eq!(results, None);
+            if collect_count == 0 {
+                assert!(forwarded.is_empty());
+                assert_eq!(receiver.try_recv(), Ok(printed("first")));
+                assert_eq!(receiver.try_recv(), Ok(Message::Event(Event::Settled)));
+            } else {
+                assert_eq!(forwarded, [printed("first"), Message::Event(Event::Settled)]);
+            }
+            assert_eq!(receiver.try_recv(), Ok(Message::Results("queued results".to_owned())));
+            assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Empty));
+        }
     }
 
     fn fixture_command(name: &str) -> Command {
