@@ -4,10 +4,12 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
 import publish_release as publisher
+from release_artifacts import SYSTEMS, admit_artifacts
 from release_contract import ARCHIVE_BINARIES
 
 REPOSITORY = "example/litmus"
@@ -159,6 +161,49 @@ class PublicationTests(unittest.TestCase):
                 self.assertEqual(uploads, self.expected.keys() - original.keys())
                 self.assertTrue(all(self.gh.assets[name] == data for name, data in original.items()))
                 self.assertEqual(len(self.gh.writes), 5 - count)
+
+    def test_original_run_artifacts_resume_a_lost_asset_upload_response_byte_for_byte(self):
+        run = {"id": 123, "head_sha": SHA}
+        metadata = []
+        stored = {}
+        for artifact_id, system in enumerate(SYSTEMS, start=1):
+            metadata.append({
+                "expired": False, "expires_at": "2026-02-01T00:00:00Z",
+                "id": artifact_id, "name": f"release-{system}", "workflow_run": run,
+            })
+            stored[artifact_id] = {name: data for name, data in self.expected.items()
+                                   if f"-{system}-" in name}
+        self.seed(count=1)
+        self.gh.hooks["after_upload_asset"] = fail
+        with self.assertRaises(publisher.GHError):
+            self.publish()
+        original_assets = dict(self.gh.assets)
+        self.assertEqual(len(original_assets), 2)
+
+        # A rebuild is still refused. Recovery must download the stored original bytes.
+        for path in self.directory.iterdir():
+            with zipfile.ZipFile(path, "a") as archive:
+                archive.comment = b"different nondeterministic build"
+        writes_before = list(self.gh.writes)
+        with self.assertRaisesRegex(ValueError, "differs from this run"):
+            self.publish()
+        self.assertEqual(self.gh.writes, writes_before)
+        self.assertEqual(self.gh.assets, original_assets)
+
+        selected = admit_artifacts(
+            run, [{"artifacts": metadata, "total_count": len(metadata)}],
+            run["id"], SHA, datetime(2026, 1, 1, tzinfo=UTC),
+        )
+        for artifact_id in selected.values():
+            for name, data in stored[artifact_id].items():
+                (self.directory / name).write_bytes(data)
+        self.assertEqual({path.name: path.read_bytes() for path in self.directory.iterdir()}, self.expected)
+        self.publish()
+        self.assert_complete()
+        uploads = [write[1] for write in self.gh.writes if write[0] == "upload_asset"]
+        self.assertEqual(len(uploads), 3)
+        self.assertEqual(len(set(uploads)), 3)
+        self.assertTrue(all(self.gh.assets[name] == data for name, data in original_assets.items()))
 
     def test_published_release_is_a_verified_no_op(self):
         self.seed(draft=False, count=4)

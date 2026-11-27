@@ -45,6 +45,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git log --format='%H %T' origin/main > "$RUNNER_TEMP/main-history.txt"
           python .github/scripts/publish_release.py --inspect-tag \
             --root . --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" \
             > "$RUNNER_TEMP/tag.json"
@@ -57,7 +58,7 @@ jobs:
             --pulls "$RUNNER_TEMP/pulls.json" --repository "$GITHUB_REPOSITORY" \
             --sha "$GITHUB_SHA" --tag "$RUNNER_TEMP/tag.json" \
             --proposed-tree "$(git rev-parse 'HEAD^{tree}')" \
-            --main-tree "$(git rev-parse 'origin/main^{tree}')")
+            --main-history "$RUNNER_TEMP/main-history.txt")
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
   build-release:
@@ -78,6 +79,9 @@ jobs:
             runner: ubuntu-latest
             targets: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
+    permissions:
+      actions: read
+      contents: read
     defaults:
       run:
         shell: bash
@@ -89,25 +93,51 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-          submodules: recursive
 
-      - name: Check the source commit
-        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      # Run IDs span rerun attempts. Never replace an artifact from an earlier attempt.
+      - name: Admit original artifacts from this exact workflow run
+        id: artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            > "$RUNNER_TEMP/run.json"
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/artifacts.json"
+          artifact_id=$(python .github/scripts/release_artifacts.py \
+            --run "$RUNNER_TEMP/run.json" --artifacts "$RUNNER_TEMP/artifacts.json" \
+            --run-id "$GITHUB_RUN_ID" --sha "$GITHUB_SHA" --system "$SYSTEM")
+          printf 'artifact-id=%s\n' "$artifact_id" >> "$GITHUB_OUTPUT"
+
+      - name: Initialize build submodules only for missing artifacts
+        if: steps.artifacts.outputs.artifact-id == 'missing'
+        run: git submodule update --init --recursive
 
       # The CLI build script uses the declared Rojo tool to embed the plugin.
       - name: Install the declared tools
+        if: steps.artifacts.outputs.artifact-id == 'missing'
         uses: CompeyDev/setup-rokit@v0.2.1
 
       - name: Install stable Rust and the binary targets
+        if: steps.artifacts.outputs.artifact-id == 'missing'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.targets }}
 
       - name: Test the native CLI
+        if: steps.artifacts.outputs.artifact-id == 'missing'
         working-directory: cli
         run: cargo test --locked
 
       - name: Build the release binaries
+        if: steps.artifacts.outputs.artifact-id == 'missing'
         working-directory: cli
         run: |
           set -euo pipefail
@@ -117,6 +147,7 @@ jobs:
 
       # Rokit selects the platform ZIP and finds the tool's binary at its root.
       - name: Archive the binaries
+        if: steps.artifacts.outputs.artifact-id == 'missing'
         run: |
           set -euo pipefail
           mkdir archives
@@ -132,8 +163,10 @@ jobs:
           done
 
       - uses: actions/upload-artifact@v7
+        if: steps.artifacts.outputs.artifact-id == 'missing'
         with:
           name: release-${{ matrix.system }}
+          overwrite: false
           path: archives/*.zip
           if-no-files-found: error
 
@@ -142,6 +175,7 @@ jobs:
     needs: [check-release-contract, build-release]
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
       pull-requests: read
     env:
@@ -159,17 +193,36 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Pin all original artifact IDs from this exact workflow run
+        id: artifacts
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            > "$RUNNER_TEMP/run.json"
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/artifacts.json"
+          artifact_ids=$(python .github/scripts/release_artifacts.py \
+            --run "$RUNNER_TEMP/run.json" --artifacts "$RUNNER_TEMP/artifacts.json" \
+            --run-id "$GITHUB_RUN_ID" --sha "$GITHUB_SHA" --all)
+          printf 'artifact-ids=%s\n' "$artifact_ids" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v8
         with:
-          pattern: release-*
+          artifact-ids: ${{ steps.artifacts.outputs.artifact-ids }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.run_id }}
           path: archives
           merge-multiple: true
+          digest-mismatch: error
 
       - name: Revalidate the contract and all four archives before publication
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git log --format='%H %T' origin/main > "$RUNNER_TEMP/main-history.txt"
           python .github/scripts/publish_release.py --inspect-tag \
             --root . --repository "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" \
             > "$RUNNER_TEMP/tag.json"
@@ -182,7 +235,7 @@ jobs:
             --pulls "$RUNNER_TEMP/pulls.json" --repository "$GITHUB_REPOSITORY" \
             --sha "$GITHUB_SHA" --tag "$RUNNER_TEMP/tag.json" --archives archives \
             --proposed-tree "$(git rev-parse 'HEAD^{tree}')" \
-            --main-tree "$(git rev-parse 'origin/main^{tree}')")
+            --main-history "$RUNNER_TEMP/main-history.txt")
           test "$version" = "$RELEASE_VERSION"
 
       - name: Resume exact-SHA publication without replacing verified content

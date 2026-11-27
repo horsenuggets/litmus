@@ -3,6 +3,7 @@
 import argparse
 import json
 import re
+import sys
 import tomllib
 import zipfile
 from pathlib import Path
@@ -101,6 +102,24 @@ def validate_proposal_trees(head_tree, merge_tree, main_tree):
     validate_tree(merge_tree, main_tree)
 
 
+def validate_main_snapshot(proposed_tree, history):
+    if not TREE_ID.fullmatch(proposed_tree):
+        raise ValueError("The landed tree must be a full Git SHA-1 tree ID.")
+    lines = history.removesuffix("\n").split("\n")
+    snapshots = {}
+    for line in lines:
+        if re.fullmatch(r"[0-9a-f]{40} [0-9a-f]{40}", line, re.ASCII) is None:
+            raise ValueError("Main history must contain full commit/tree SHA-1 pairs separated by one space.")
+        commit, tree = line.split(" ")
+        if commit in snapshots:
+            raise ValueError("Main history must not repeat commit IDs.")
+        snapshots[commit] = tree
+    for commit, tree in snapshots.items():
+        if tree == proposed_tree:
+            return commit
+    raise ValueError("The landed release tree must exactly match a reachable origin/main snapshot.")
+
+
 def merged_release_title(pulls, repository, sha):
     if not TREE_ID.fullmatch(sha):
         raise ValueError("Publication requires a full Git SHA-1 commit ID.")
@@ -147,7 +166,9 @@ def main(argv=None):
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--releases", type=Path, required=True)
     parser.add_argument("--proposed-tree", required=True)
-    parser.add_argument("--main-tree", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--main-tree")
+    source.add_argument("--main-history", type=Path)
     parser.add_argument("--merge-tree")
     parser.add_argument("--tag", type=Path, required=True)
     title = parser.add_mutually_exclusive_group(required=True)
@@ -168,8 +189,15 @@ def main(argv=None):
             title = merged_release_title(pulls, args.repository, args.sha)
             if tag is not None:
                 validate_tag(version, args.sha, tag)
-            validate_tree(args.proposed_tree, args.main_tree)
+            if args.main_history is None:
+                raise ValueError("Publication validation requires --main-history from origin/main.")
+            source_commit = validate_main_snapshot(
+                args.proposed_tree, args.main_history.read_text(encoding="utf-8")
+            )
+            print(f'Matched origin/main source commit "{source_commit}".', file=sys.stderr)
         else:
+            if args.main_tree is None:
+                raise ValueError("Proposal validation requires --main-tree for current origin/main.")
             if tag is not None:
                 raise ValueError("The proposed version already has a tag. Choose an unused version.")
             if args.merge_tree is None:

@@ -9,6 +9,7 @@ import release_contract as contract
 
 OTHER_TREE = "b" * 40
 REPOSITORY = "example/litmus"
+SOURCE_COMMIT = "c" * 40
 TREE = "a" * 40
 VERSION = "0.4.0-horse.1.2"
 
@@ -173,6 +174,29 @@ class TreeTests(unittest.TestCase):
             with self.subTest(proposed=proposed, main=main), self.assertRaises(ValueError):
                 contract.validate_tree(proposed, main)
 
+    def test_publication_accepts_an_older_matching_main_snapshot_and_pins_its_commit(self):
+        history = f"{OTHER_TREE} {OTHER_TREE}\n{SOURCE_COMMIT} {TREE}\n"
+        self.assertEqual(contract.validate_main_snapshot(TREE, history), SOURCE_COMMIT)
+        with self.assertRaisesRegex(ValueError, "reachable origin/main snapshot"):
+            contract.validate_main_snapshot(TREE, f"{OTHER_TREE} {OTHER_TREE}\n")
+        # History cannot relax proposal parity with the current main tree.
+        with self.assertRaisesRegex(ValueError, "current origin/main"):
+            contract.validate_proposal_trees(TREE, TREE, OTHER_TREE)
+
+    def test_history_is_strictly_parsed_in_full_even_after_a_matching_snapshot(self):
+        valid = f"{SOURCE_COMMIT} {TREE}"
+        for invalid in ("", "\n", "a b", f"{SOURCE_COMMIT}  {TREE}",
+                        f"{SOURCE_COMMIT}\t{TREE}", f"{SOURCE_COMMIT} {TREE.upper()}",
+                        valid + " extra", valid + "\r\n", valid + "\n\n",
+                        valid + "\nmalformed", valid + "\n" + valid,
+                        valid + f"\n{SOURCE_COMMIT} {OTHER_TREE}"):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                contract.validate_main_snapshot(TREE, invalid)
+        self.assertEqual(contract.validate_main_snapshot(TREE, valid), SOURCE_COMMIT)
+        for invalid in ("", "a" * 7, "HEAD", TREE + "\n"):
+            with self.subTest(tree=invalid), self.assertRaises(ValueError):
+                contract.validate_main_snapshot(invalid, valid)
+
     def test_requires_the_exact_merge_commit_and_repository(self):
         self.assertEqual(contract.merged_release_title([pull()], REPOSITORY, TREE), f"Release {VERSION}")
         invalid = [
@@ -250,20 +274,64 @@ class CommandTests(unittest.TestCase):
             "releases.json": "[[]]",
             "tag.json": "null",
             "pulls.json": json.dumps([[pull()]]),
+            "main-history.txt": f"{SOURCE_COMMIT} {TREE}\n",
         }
         self.args = ["--root", ".", "--releases", "releases.json", "--tag", "tag.json",
-                     "--proposed-tree", TREE, "--main-tree", TREE]
+                     "--proposed-tree", TREE]
+        self.publication = ["--pulls", "pulls.json", "--repository", REPOSITORY, "--sha", TREE]
 
-    def run_contract(self, args):
+    def run_contract(self, args, *, source=None):
+        if source is None:
+            source = (["--main-history", "main-history.txt"] if "--pulls" in args
+                      else ["--main-tree", TREE])
         output = io.StringIO()
+        self.errors = io.StringIO()
         with patch.object(Path, "read_text", autospec=True, side_effect=lambda path, **kwargs: self.files[str(path)]):
-            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
-                contract.main(self.args + args)
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(self.errors):
+                contract.main(self.args + source + args)
         return output.getvalue()
 
     def test_pr_and_publication_modes_use_the_same_contract(self):
         self.assertEqual(self.run_contract(["--title", f"Release {VERSION}", "--merge-tree", TREE]), VERSION + "\n")
         self.assertEqual(self.run_contract(["--pulls", "pulls.json", "--repository", REPOSITORY, "--sha", TREE]), VERSION + "\n")
+
+    def test_advanced_main_accepts_only_the_exact_release_retry_from_main_history(self):
+        self.files["main-history.txt"] = f"{OTHER_TREE} {OTHER_TREE}\n{SOURCE_COMMIT} {TREE}\n"
+        self.files["tag.json"] = json.dumps(tag_ref())
+        for draft in (False, True):
+            self.files["releases.json"] = json.dumps([[release(VERSION, draft=draft)]])
+            self.assertEqual(self.run_contract(self.publication), VERSION + "\n")
+            self.assertIn(SOURCE_COMMIT, self.errors.getvalue())
+        self.files["main-history.txt"] = f"{OTHER_TREE} {OTHER_TREE}\n"
+        with self.assertRaises(SystemExit):
+            self.run_contract(self.publication)
+        self.assertIn("reachable origin/main snapshot", self.errors.getvalue())
+
+    def test_historical_admission_is_only_for_publication(self):
+        proposal = ["--title", f"Release {VERSION}", "--merge-tree", TREE]
+        for args, source in ((proposal, ["--main-tree", OTHER_TREE]),
+                             (proposal, ["--main-history", "main-history.txt"]),
+                             (self.publication, ["--main-tree", TREE]),
+                             (self.publication, [])):
+            with self.subTest(args=args, source=source), self.assertRaises(SystemExit):
+                self.run_contract(args, source=source)
+
+    def test_historical_snapshot_never_relaxes_merged_pr_or_triggering_sha_checks(self):
+        self.files["main-history.txt"] = f"{OTHER_TREE} {OTHER_TREE}\n{SOURCE_COMMIT} {TREE}\n"
+        invalid = [
+            [pull(merge_commit_sha=OTHER_TREE)], [pull(merged_at=None)], [pull(), pull()],
+            [pull(title="Release other")],
+            [pull(base={"ref": "main", "repo": {"full_name": REPOSITORY}})],
+            [pull(base={"ref": "release", "repo": {"full_name": "other/litmus"}})],
+        ]
+        for pulls in invalid:
+            self.files["pulls.json"] = json.dumps([pulls])
+            with self.subTest(pulls=pulls), self.assertRaises(SystemExit):
+                self.run_contract(self.publication)
+        self.files["pulls.json"] = json.dumps([[pull()]])
+        for sha in (OTHER_TREE, "a" * 7):
+            with self.subTest(sha=sha), self.assertRaises(SystemExit):
+                self.run_contract(["--pulls", "pulls.json", "--repository", REPOSITORY, "--sha", sha])
 
     def test_proposal_requires_merge_tree_even_when_head_matches(self):
         with self.assertRaises(SystemExit):
