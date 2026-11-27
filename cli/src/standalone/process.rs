@@ -148,7 +148,7 @@ fn run_with_budget(
         let mut owned = child.lock().unwrap();
         owned.stop(&shown)
     };
-    if stopped.is_ok() {
+    reported = collect_report(reported, || {
         let drain_deadline = Instant::now() + Duration::from_secs(1);
         // Collect before replaying logs so output backpressure cannot hide queued results.
         let mut pending = Vec::new();
@@ -174,8 +174,8 @@ fn run_with_budget(
             }
         }
         display.finish();
-        reported = reported.map(|report| report.or(final_report));
-    }
+        final_report
+    });
     if interrupt.cancelled() {
         reported = Err("the standalone run was interrupted".to_owned());
     }
@@ -303,6 +303,10 @@ fn wait_for_exit(
         }
         thread::sleep(wait);
     }
+}
+
+fn collect_report(reported: Result<Option<String>, String>, collect: impl FnOnce() -> Option<String>) -> Result<Option<String>, String> {
+    reported.map(|report| report.or(collect()))
 }
 
 // What the run comes to. Results the runtime reported still count when stopping it then
@@ -439,6 +443,10 @@ mod tests {
         #[cfg(windows)]
         super::windows_tests::ignore_ctrl_c(true);
         let mode = fs::read_to_string("mode").unwrap();
+        if mode == "natural-backlog-results" {
+            descendant_fixture();
+            return;
+        }
         #[cfg(unix)]
         if matches!(mode.as_str(), "moved-launcher" | "moved-launcher-broken-pipe") {
             let group = fs::read_to_string("parent-group").unwrap().parse::<libc::pid_t>().unwrap();
@@ -489,7 +497,7 @@ mod tests {
             std::io::stdout().flush().unwrap();
         }
         let prints = match mode.as_str() {
-            "backlog-results" | "interrupt-output" => 10_000,
+            "backlog-results" | "interrupt-output" | "natural-backlog-results" => 10_000,
             "blocked-output" => 1_000_000,
             "broken-pipe" | "moved-launcher-broken-pipe" | "retained-reader" => 1,
             _ => 0,
@@ -497,7 +505,7 @@ mod tests {
         for _ in 0..prints {
             println!("The runtime is still running.");
         }
-        if mode == "backlog-results" {
+        if matches!(mode.as_str(), "backlog-results" | "natural-backlog-results") {
             println!("\n{MARKER}{{\"specs\":[]}}");
             std::io::stdout().flush().unwrap();
             fs::write("reported", "").unwrap();
@@ -509,7 +517,9 @@ mod tests {
             println!("The runtime is still running.");
             std::io::stdout().flush().unwrap();
         }
-        let _ = connection.read(&mut [0]);
+        if mode != "natural-backlog-results" {
+            let _ = connection.read(&mut [0]);
+        }
     }
 
     fn wrapper_run() -> Vec<String> {
@@ -756,7 +766,7 @@ mod tests {
             connection.set_nonblocking(false).unwrap();
             connection.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
             connection.read_exact(&mut [0]).unwrap();
-            if signal.is_none() && !matches!(mode, "backlog-results" | "retained-reader") {
+            if signal.is_none() && !matches!(mode, "backlog-results" | "natural-backlog-results" | "retained-reader") {
                 drop(child.stdout.take());
             }
             connection.write_all(&[1]).unwrap();
@@ -822,7 +832,7 @@ mod tests {
             if mode == "interrupt-results" {
                 project.write("report", "");
             }
-            let output = if mode == "backlog-results" {
+            let output = if matches!(mode, "backlog-results" | "natural-backlog-results") {
                 let reported = project.join("reported");
                 while !reported.exists() && Instant::now() < deadline {
                     thread::sleep(Duration::from_millis(10));
@@ -923,6 +933,11 @@ mod tests {
     }
 
     #[test]
+    fn queued_results_survive_a_natural_exit_without_any_descendants() {
+        termination_case(None, "natural-backlog-results");
+    }
+
+    #[test]
     fn queued_results_survive_slow_output_replay_after_launcher_exit() {
         termination_case(None, "backlog-results");
     }
@@ -976,6 +991,62 @@ mod tests {
         use std::os::windows::process::ExitStatusExt;
 
         ExitStatus::from_raw(0)
+    }
+
+    #[test]
+    fn keeps_queued_results_with_a_warning_when_cleanup_fails() {
+        let reported = collect_report(Ok(None), || Some("queued results".to_owned()));
+        let (outcome, warning) = outcome("lune run", reported, Err("couldn't stop it".to_owned()));
+
+        assert_eq!(outcome, Ok("queued results".to_owned()));
+        assert_eq!(warning.as_deref(), Some("couldn't stop it"));
+    }
+
+    #[test]
+    fn collects_queued_reports_without_replacing_already_accepted_results() {
+        for accepted in [None, Some("accepted results".to_owned())] {
+            for queued in [None, Some("queued results".to_owned())] {
+                let mut collected = false;
+                let reported = collect_report(Ok(accepted.clone()), || {
+                    collected = true;
+                    queued.clone()
+                });
+
+                assert!(collected, "A valid report state must collect queued messages even with accepted results.");
+                assert_eq!(reported, Ok(accepted.clone().or(queued)));
+            }
+        }
+    }
+
+    #[test]
+    fn does_not_collect_queued_reports_after_reporting_failed() {
+        let reported = collect_report(Err("it timed out".to_owned()), || panic!("A failed report must not collect queued messages."));
+
+        assert_eq!(reported, Err("it timed out".to_owned()));
+    }
+
+    #[test]
+    fn report_collection_depends_on_valid_reporting_not_cleanup_success() {
+        for valid_report in [false, true] {
+            for cleanup_succeeded in [false, true] {
+                let mut collected = false;
+                let reported = if valid_report { Ok(None) } else { Err("it timed out".to_owned()) };
+                let stopped = if cleanup_succeeded { Ok(exited()) } else { Err("couldn't stop it".to_owned()) };
+                let reported = collect_report(reported, || {
+                    collected = true;
+                    Some("queued results".to_owned())
+                });
+                let expected = match (valid_report, cleanup_succeeded) {
+                    (true, true) => (Ok("queued results".to_owned()), None),
+                    (true, false) => (Ok("queued results".to_owned()), Some("couldn't stop it".to_owned())),
+                    (false, true) => (Err("it timed out".to_owned()), None),
+                    (false, false) => (Err("it timed out, and couldn't stop it".to_owned()), None),
+                };
+
+                assert_eq!(collected, valid_report);
+                assert_eq!(outcome("lune run", reported, stopped), expected, "{valid_report}, {cleanup_succeeded}");
+            }
+        }
     }
 
     #[test]
