@@ -232,7 +232,7 @@ fn outcome(
 
 fn in_words(duration: Duration) -> String {
     let seconds = duration.as_secs();
-    let (count, unit) = if seconds >= 60 && seconds % 60 == 0 { (seconds / 60, "minute") } else { (seconds, "second") };
+    let (count, unit) = if seconds >= 60 && seconds.is_multiple_of(60) { (seconds / 60, "minute") } else { (seconds, "second") };
 
     format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
 }
@@ -557,6 +557,7 @@ mod tests {
 
     #[test]
     #[ignore = "invoked as a subprocess by process cleanup tests"]
+    #[allow(clippy::zombie_processes, reason = "The outer process owner must stop descendants after this launcher exits.")]
     fn wrapper_fixture() {
         let mode = fs::read_to_string("mode").unwrap();
         let mut child = fixture_command("standalone::process::tests::descendant_fixture").spawn().unwrap();
